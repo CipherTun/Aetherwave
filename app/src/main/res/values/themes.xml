@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Aetherwave" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0A0E1A</item>
+        <item name="android:navigationBarColor">#0A0E1A</item>
+        <item name="android:windowBackground">#0A0E1A</item>
+    </style>
+</resources>
