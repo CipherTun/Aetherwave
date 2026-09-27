@@ -9,7 +9,7 @@ android {
     namespace = "com.ciphertun.aetherwave"
     // Bump compileSdk to whatever Android Studio currently offers as stable —
     // 34 is used here as a safe, long-established baseline.
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ciphertun.aetherwave"
