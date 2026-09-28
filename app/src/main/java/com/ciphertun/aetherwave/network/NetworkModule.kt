@@ -63,6 +63,15 @@ object NetworkModule {
             .create(AppleChartsApi::class.java)
     }
 
+    val openverseApi: OpenverseApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.openverse.org/")
+            .client(baseClient())
+            .addConverterFactory(jsonConverter)
+            .build()
+            .create(OpenverseApi::class.java)
+    }
+
     /** Plain client (no JSON converter) for fetching raw RSS feed bodies to hand to RssFeedParser. */
     val rssHttpClient: OkHttpClient by lazy { baseClient() }
 }

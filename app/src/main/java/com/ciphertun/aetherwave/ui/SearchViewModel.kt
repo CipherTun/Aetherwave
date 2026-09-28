@@ -6,6 +6,8 @@ import com.ciphertun.aetherwave.data.MusicRepository
 import com.ciphertun.aetherwave.model.PodcastEpisode
 import com.ciphertun.aetherwave.model.PodcastShow
 import com.ciphertun.aetherwave.model.Track
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +17,13 @@ enum class LoadState { IDLE, LOADING, ERROR, DONE }
 
 data class MusicUiState(
     val query: String = "",
+    /** Search results — only populated/shown while [query] is non-blank. */
     val tracks: List<Track> = emptyList(),
+    /** ISO 3166-1 alpha-3 — see FEATURED_MUSIC_COUNTRIES. Drives [countryTracks]. */
+    val musicCountry: String = "ZAF",
+    val newReleases: List<Track> = emptyList(),
+    val trending: List<Track> = emptyList(),
+    val countryTracks: List<Track> = emptyList(),
     val loadState: LoadState = LoadState.IDLE
 )
 
@@ -39,30 +47,52 @@ class SearchViewModel(
     val podcasts: StateFlow<PodcastUiState> = _podcasts.asStateFlow()
 
     init {
-        loadTrendingMusic()
+        loadMusicHome()
         loadTrendingPodcasts()
     }
 
-    fun loadTrendingMusic() {
+    /** Loads the three home rails (New Releases, Popular, Artists from <country>) in parallel. */
+    fun loadMusicHome() {
         _music.value = _music.value.copy(loadState = LoadState.LOADING)
         viewModelScope.launch {
-            val results = repository.trendingMusic()
-            _music.value = _music.value.copy(tracks = results, loadState = LoadState.DONE)
+            coroutineScope {
+                val newReleasesDeferred = async { repository.newReleases() }
+                val trendingDeferred = async { repository.trendingMusic() }
+                val countryDeferred = async { repository.artistsInCountry(_music.value.musicCountry) }
+                _music.value = _music.value.copy(
+                    newReleases = newReleasesDeferred.await(),
+                    trending = trendingDeferred.await(),
+                    countryTracks = countryDeferred.await(),
+                    loadState = LoadState.DONE
+                )
+            }
         }
     }
 
     fun searchMusic(query: String) {
-        _music.value = _music.value.copy(query = query, loadState = LoadState.LOADING)
+        _music.value = _music.value.copy(query = query)
         if (query.isBlank()) {
-            loadTrendingMusic()
+            // Blank query = back to the sectioned home view; those rails are
+            // already cached in state, no need to reload them.
+            _music.value = _music.value.copy(loadState = LoadState.DONE)
             return
         }
+        _music.value = _music.value.copy(loadState = LoadState.LOADING)
         viewModelScope.launch {
             val results = repository.searchMusic(query)
             _music.value = _music.value.copy(
                 tracks = results,
                 loadState = if (results.isEmpty()) LoadState.ERROR else LoadState.DONE
             )
+        }
+    }
+
+    /** [countryCode3] is ISO 3166-1 alpha-3, e.g. "ZAF" — see FEATURED_MUSIC_COUNTRIES. */
+    fun setMusicCountry(countryCode3: String) {
+        _music.value = _music.value.copy(musicCountry = countryCode3)
+        viewModelScope.launch {
+            val results = repository.artistsInCountry(countryCode3)
+            _music.value = _music.value.copy(countryTracks = results)
         }
     }
 

@@ -76,5 +76,17 @@ data class ArchiveFile(
 fun archiveDownloadUrl(identifier: String, filename: String): String =
     "https://archive.org/download/$identifier/${filename}"
 
-/** Formats archive.org tends to use for compressed, streamable audio. */
-val PREFERRED_ARCHIVE_AUDIO_FORMATS = listOf("VBR MP3", "MP3", "Ogg Vorbis", "64Kbps MP3")
+/** Smaller, lossy formats — used for the *streaming* URL so playback starts fast and doesn't burn mobile data. */
+val PREFERRED_ARCHIVE_STREAM_FORMATS = listOf("VBR MP3", "MP3", "Ogg Vorbis", "64Kbps MP3")
+
+/**
+ * Lossless-first — used for the *download* URL, per archive.org's own
+ * documented format names (help.archive.org/help/files-formats-and-derivatives-file-definitions-2).
+ * Falls through to progressively lossier formats only if the item genuinely
+ * has no lossless master (common for old-time-radio/spoken-word items that
+ * were only ever digitized as mp3).
+ */
+val PREFERRED_ARCHIVE_DOWNLOAD_FORMATS = listOf(
+    "24bit Flac", "Flac", "AIFF", "WAVE", "Apple Lossless Audio",
+    "VBR MP3", "Advanced Audio Coding", "Ogg Vorbis", "MP3", "64Kbps MP3"
+)

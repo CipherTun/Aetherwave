@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +31,7 @@ import com.ciphertun.aetherwave.data.LibraryStore
 import com.ciphertun.aetherwave.download.Downloader
 import com.ciphertun.aetherwave.model.DownloadStatus
 import com.ciphertun.aetherwave.model.FEATURED_COUNTRIES
+import com.ciphertun.aetherwave.model.FEATURED_MUSIC_COUNTRIES
 import com.ciphertun.aetherwave.model.PodcastEpisode
 import com.ciphertun.aetherwave.model.PodcastShow
 import com.ciphertun.aetherwave.model.Track
@@ -37,7 +39,9 @@ import com.ciphertun.aetherwave.playback.PlayerManager
 import com.ciphertun.aetherwave.ui.theme.NeonCyan
 import com.ciphertun.aetherwave.ui.theme.NeonPurple
 import com.ciphertun.aetherwave.ui.theme.SurfaceElevated
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.LocalTime
 
 private enum class Tab { MUSIC, PODCASTS, LIBRARY }
 
@@ -49,6 +53,12 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
     val podcastState by viewModel.podcasts.collectAsState()
     val nowPlaying by PlayerManager.nowPlaying.collectAsState()
     val isPlaying by PlayerManager.isPlaying.collectAsState()
+    val queue by PlayerManager.queue.collectAsState()
+    val currentIndex by PlayerManager.currentIndex.collectAsState()
+    val shuffleEnabled by PlayerManager.shuffleEnabled.collectAsState()
+    val repeatMode by PlayerManager.repeatMode.collectAsState()
+    val playbackSpeed by PlayerManager.playbackSpeed.collectAsState()
+    val sleepTimerEndsAt by PlayerManager.sleepTimerEndsAtMillis.collectAsState()
     val librarySnapshot by LibraryStore.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -58,7 +68,7 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
     // the "already downloaded" badge on search rows included.
     LaunchedEffect(librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
         while (librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
-            kotlinx.coroutines.delay(1200)
+            delay(1200)
             LibraryStore.reconcile()
         }
     }
@@ -99,7 +109,11 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    Tab.MUSIC -> MusicTab(musicState, onSearch = viewModel::searchMusic)
+                    Tab.MUSIC -> MusicTab(
+                        state = musicState,
+                        onSearch = viewModel::searchMusic,
+                        onSetCountry = viewModel::setMusicCountry
+                    )
                     Tab.PODCASTS -> PodcastTab(
                         state = podcastState,
                         onSearch = viewModel::searchPodcasts,
@@ -121,47 +135,153 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
                 val context = LocalContext.current
                 val downloader = remember { Downloader(context) }
                 val isFavorite = track.id in librarySnapshot.favoriteIds
+                val hasMultiple = queue.size > 1
                 NowPlayingScreen(
                     track = track,
                     isPlaying = isPlaying,
                     isFavorite = isFavorite,
                     isDownloadable = track.isDownloadable,
+                    hasNext = hasMultiple,
+                    hasPrevious = hasMultiple,
+                    shuffleEnabled = shuffleEnabled,
+                    repeatMode = repeatMode,
+                    playbackSpeed = playbackSpeed,
+                    sleepTimerEndsAtMillis = sleepTimerEndsAt,
                     onToggleFavorite = { scope.launch { LibraryStore.toggleFavorite(track.id) } },
                     onDownload = { scope.launch { downloader.downloadTrack(track) } },
-                    onCollapse = { playerExpanded = false }
+                    onCollapse = { playerExpanded = false },
+                    onSkipNext = { PlayerManager.skipNext() },
+                    onSkipPrevious = { PlayerManager.skipPrevious() },
+                    onToggleShuffle = { PlayerManager.toggleShuffle() },
+                    onCycleRepeat = { PlayerManager.cycleRepeatMode() },
+                    onSetSpeed = { PlayerManager.setPlaybackSpeed(it) },
+                    onScheduleSleepTimer = { PlayerManager.scheduleSleepTimer(it) },
+                    onCancelSleepTimer = { PlayerManager.cancelSleepTimer() }
                 )
             }
         }
     }
 }
 
+private fun greeting(): String = when (LocalTime.now().hour) {
+    in 5..11 -> "Good morning"
+    in 12..16 -> "Good afternoon"
+    else -> "Good evening"
+}
+
 @Composable
-private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit) {
+private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCountry: (String) -> Unit) {
     val context = LocalContext.current
     val downloader = remember { Downloader(context) }
     val scope = rememberCoroutineScope()
+    val recentlyPlayed by PlayerManager.recentlyPlayed.collectAsState()
+    val isBrowsingHome = state.query.isBlank()
 
     Column(Modifier.fillMaxSize()) {
         SearchField(
             value = state.query,
-            placeholder = "Search Jamendo + Internet Archive…",
+            placeholder = "Search Jamendo + Internet Archive + Openverse…",
             onSearch = onSearch
         )
         when {
-            state.loadState == LoadState.LOADING -> ShimmerList()
-            state.tracks.isEmpty() -> EmptyState("No tracks found — try another search")
-            else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                items(state.tracks, key = { it.id }) { track ->
+            state.loadState == LoadState.LOADING && isBrowsingHome && state.trending.isEmpty() -> ShimmerList()
+            !isBrowsingHome && state.loadState == LoadState.LOADING -> ShimmerList()
+            !isBrowsingHome && state.tracks.isEmpty() -> EmptyState("No tracks found — try another search")
+            !isBrowsingHome -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                itemsIndexed(state.tracks, key = { _, t -> t.id }) { index, track ->
                     TrackRow(
                         track = track,
-                        onPlay = { PlayerManager.play(track) },
+                        onPlay = { PlayerManager.playQueue(state.tracks, index) },
                         onDownload = if (track.isDownloadable) {
                             { scope.launch { downloader.downloadTrack(track) } }
                         } else null
                     )
                 }
             }
+            else -> {
+                val countryName = FEATURED_MUSIC_COUNTRIES.firstOrNull { it.first == state.musicCountry }?.second
+                    ?: state.musicCountry
+                LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                    item {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text(greeting(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Openly licensed music from around the world",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    if (recentlyPlayed.isNotEmpty()) {
+                        item { MusicRail(title = "Recently played", tracks = recentlyPlayed) }
+                    }
+                    if (state.newReleases.isNotEmpty()) {
+                        item { MusicRail(title = "New releases on Jamendo", tracks = state.newReleases) }
+                    }
+                    item {
+                        Text(
+                            "Artists based in",
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                        CountryChipRow(
+                            options = FEATURED_MUSIC_COUNTRIES,
+                            selected = state.musicCountry,
+                            onSelect = onSetCountry
+                        )
+                    }
+                    if (state.countryTracks.isNotEmpty()) {
+                        item { MusicRail(title = countryName, tracks = state.countryTracks) }
+                    } else {
+                        item {
+                            Text(
+                                "No Jamendo artists have tagged $countryName as home yet — try another country, or search by name/genre above",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    if (state.trending.isNotEmpty()) {
+                        item { MusicRail(title = "Popular this month", tracks = state.trending) }
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun MusicRail(title: String, tracks: List<Track>) {
+    Column(Modifier.padding(top = 4.dp, bottom = 4.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+                HeroTrackCard(track = track, onClick = { PlayerManager.playQueue(tracks, index) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroTrackCard(track: Track, onClick: () -> Unit) {
+    Column(Modifier.width(140.dp).clickable(onClick = onClick)) {
+        AsyncImage(
+            model = track.artworkUrl,
+            contentDescription = null,
+            modifier = Modifier.size(140.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceElevated)
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(track.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -181,7 +301,7 @@ private fun PodcastTab(
     Column(Modifier.fillMaxSize()) {
         if (show == null) {
             SearchField(value = state.query, placeholder = "Search podcasts worldwide…", onSearch = onSearch)
-            CountryChipRow(selected = state.country, onSelect = onSetCountry)
+            CountryChipRow(options = FEATURED_COUNTRIES, selected = state.country, onSelect = onSetCountry)
         } else {
             Row(
                 Modifier.fillMaxWidth().padding(12.dp),
@@ -203,41 +323,42 @@ private fun PodcastTab(
                 }
             }
             state.episodes.isEmpty() -> EmptyState("Couldn't read an episode list from this show's feed")
-            else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                items(state.episodes, key = { it.id }) { ep ->
-                    EpisodeRow(
-                        episode = ep,
-                        onPlay = {
-                            PlayerManager.play(
-                                Track(
-                                    id = ep.id,
-                                    title = ep.episodeTitle,
-                                    artist = ep.podcastTitle,
-                                    artworkUrl = ep.artworkUrl,
-                                    streamUrl = ep.audioUrl,
-                                    downloadUrl = ep.audioUrl,
-                                    durationSeconds = ep.durationSeconds,
-                                    source = Track.Source.PODCAST,
-                                    language = null,
-                                    licenseNote = "Podcast episode"
-                                )
-                            )
-                        },
-                        onDownload = { scope.launch { downloader.downloadEpisode(ep) } }
-                    )
+            else -> {
+                val episodeTracks = state.episodes.map { it.toTrack() }
+                LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                    itemsIndexed(state.episodes, key = { _, ep -> ep.id }) { index, ep ->
+                        EpisodeRow(
+                            episode = ep,
+                            onPlay = { PlayerManager.playQueue(episodeTracks, index) },
+                            onDownload = { scope.launch { downloader.downloadEpisode(ep) } }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+private fun PodcastEpisode.toTrack(): Track = Track(
+    id = id,
+    title = episodeTitle,
+    artist = podcastTitle,
+    artworkUrl = artworkUrl,
+    streamUrl = audioUrl,
+    downloadUrl = audioUrl,
+    durationSeconds = durationSeconds,
+    source = Track.Source.PODCAST,
+    language = null,
+    licenseNote = "Podcast episode"
+)
+
 @Composable
-private fun CountryChipRow(selected: String, onSelect: (String) -> Unit) {
+private fun CountryChipRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(FEATURED_COUNTRIES, key = { it.first }) { (code, name) ->
+        items(options, key = { it.first }) { (code, name) ->
             FilterChip(
                 selected = code == selected,
                 onClick = { onSelect(code) },
@@ -347,6 +468,7 @@ private fun SourceBadge(source: Track.Source) {
     val label = when (source) {
         Track.Source.JAMENDO -> "Jamendo · CC"
         Track.Source.ARCHIVE_ORG -> "Internet Archive"
+        Track.Source.OPENVERSE -> "Openverse"
         Track.Source.PODCAST -> "Podcast"
     }
     Text(
@@ -362,35 +484,55 @@ private fun SourceBadge(source: Track.Source) {
 
 @Composable
 private fun MiniPlayerBar(track: Track, isPlaying: Boolean, onExpand: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onExpand)
-            .background(Brush.horizontalGradient(listOf(SurfaceElevated, NeonPurple.copy(alpha = 0.15f))))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncImage(
-            model = track.artworkUrl,
-            contentDescription = null,
-            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceElevated)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-            Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    var position by remember(track.id) { mutableFloatStateOf(0f) }
+    var duration by remember(track.id) { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(track.id, isPlaying) {
+        while (true) {
+            position = PlayerManager.currentPositionMs().toFloat()
+            val d = PlayerManager.durationMs().toFloat()
+            if (d > 0f) duration = d
+            delay(1000)
         }
-        EqualizerBars(playing = isPlaying, modifier = Modifier.padding(end = 10.dp))
-        IconButton(
-            onClick = { PlayerManager.togglePlayPause() },
-            modifier = Modifier.clip(CircleShape).background(NeonCyan)
+    }
+
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onExpand)
+                .background(Brush.horizontalGradient(listOf(SurfaceElevated, NeonPurple.copy(alpha = 0.15f))))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = "Play/Pause",
-                tint = SurfaceElevated
+            AsyncImage(
+                model = track.artworkUrl,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceElevated)
             )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            EqualizerBars(playing = isPlaying, modifier = Modifier.padding(end = 10.dp))
+            IconButton(
+                onClick = { PlayerManager.togglePlayPause() },
+                modifier = Modifier.clip(CircleShape).background(NeonCyan)
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = "Play/Pause",
+                    tint = SurfaceElevated
+                )
+            }
         }
+        LinearProgressIndicator(
+            progress = { if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f },
+            modifier = Modifier.fillMaxWidth().height(2.dp),
+            color = NeonCyan,
+            trackColor = SurfaceElevated
+        )
     }
 }
 

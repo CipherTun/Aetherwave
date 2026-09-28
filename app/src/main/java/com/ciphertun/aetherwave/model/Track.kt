@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * One playable/downloadable item, normalized from whichever source it came
- * from so the rest of the app never has to think about Jamendo vs. Archive.org
- * vs. Podcast Index shapes.
+ * from (Jamendo, Internet Archive, Openverse, or a podcast feed) so the rest
+ * of the app never has to think about each source's own response shape.
  */
 data class Track(
     val id: String,
@@ -21,7 +21,7 @@ data class Track(
     val licenseNote: String
 ) {
     @Serializable
-    enum class Source { JAMENDO, ARCHIVE_ORG, PODCAST }
+    enum class Source { JAMENDO, ARCHIVE_ORG, OPENVERSE, PODCAST }
 
     val isDownloadable: Boolean get() = downloadUrl != null
 }
@@ -34,4 +34,23 @@ data class PodcastEpisode(
     val audioUrl: String,
     val durationSeconds: Int?,
     val datePublished: Long?
+)
+
+/**
+ * Countries with genuine artist-location data behind them (see
+ * JamendoApi.artistsInCountry) — ISO 3166-1 **alpha-3**, which is what
+ * Jamendo's location filter expects (not the alpha-2 codes used for the
+ * podcast storefront picker).
+ */
+val FEATURED_MUSIC_COUNTRIES = listOf(
+    "ZAF" to "South Africa",
+    "NGA" to "Nigeria",
+    "USA" to "United States",
+    "GBR" to "United Kingdom",
+    "DEU" to "Germany",
+    "FRA" to "France",
+    "BRA" to "Brazil",
+    "IND" to "India",
+    "JPN" to "Japan",
+    "AUS" to "Australia"
 )

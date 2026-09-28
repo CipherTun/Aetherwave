@@ -80,27 +80,18 @@ fun LibraryTab() {
                 )
             }
         } else {
+            val playableTracks = entries
+                .filter { it.status == DownloadStatus.COMPLETE && it.localUri != null }
+                .map { it.toOfflineTrack() }
+
             LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
                 items(entries, key = { it.id }) { entry ->
                     LibraryRow(
                         entry = entry,
                         isFavorite = entry.id in snapshot.favoriteIds,
                         onPlay = {
-                            val uri = entry.localUri ?: return@LibraryRow
-                            PlayerManager.play(
-                                Track(
-                                    id = entry.id,
-                                    title = entry.title,
-                                    artist = entry.artist,
-                                    artworkUrl = entry.artworkUrl,
-                                    streamUrl = uri,
-                                    downloadUrl = uri,
-                                    durationSeconds = null,
-                                    source = entry.source,
-                                    language = null,
-                                    licenseNote = "Downloaded — playing offline from this device"
-                                )
-                            )
+                            val playIndex = playableTracks.indexOfFirst { it.id == entry.id }
+                            if (playIndex >= 0) PlayerManager.playQueue(playableTracks, playIndex)
                         },
                         onToggleFavorite = { scope.launch { LibraryStore.toggleFavorite(entry.id) } },
                         onRemove = { scope.launch { LibraryStore.remove(entry.id) } }
@@ -110,6 +101,19 @@ fun LibraryTab() {
         }
     }
 }
+
+private fun LibraryEntry.toOfflineTrack(): Track = Track(
+    id = id,
+    title = title,
+    artist = artist,
+    artworkUrl = artworkUrl,
+    streamUrl = localUri ?: "",
+    downloadUrl = localUri,
+    durationSeconds = null,
+    source = source,
+    language = null,
+    licenseNote = "Downloaded — playing offline from this device"
+)
 
 @Composable
 private fun LibraryRow(

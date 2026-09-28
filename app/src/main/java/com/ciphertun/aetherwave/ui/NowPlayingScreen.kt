@@ -8,7 +8,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -16,6 +15,15 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.ciphertun.aetherwave.model.Track
 import com.ciphertun.aetherwave.playback.PlayerManager
@@ -46,19 +55,37 @@ import com.ciphertun.aetherwave.ui.theme.NeonPurple
 import com.ciphertun.aetherwave.ui.theme.VoidBlack
 import kotlinx.coroutines.delay
 
+private val SPEED_PRESETS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+private val SLEEP_TIMER_OPTIONS = listOf(10, 20, 30, 45, 60)
+
 @Composable
 fun NowPlayingScreen(
     track: Track,
     isPlaying: Boolean,
     isFavorite: Boolean,
     isDownloadable: Boolean,
+    hasNext: Boolean,
+    hasPrevious: Boolean,
+    shuffleEnabled: Boolean,
+    repeatMode: Int,
+    playbackSpeed: Float,
+    sleepTimerEndsAtMillis: Long?,
     onToggleFavorite: () -> Unit,
     onDownload: () -> Unit,
-    onCollapse: () -> Unit
+    onCollapse: () -> Unit,
+    onSkipNext: () -> Unit,
+    onSkipPrevious: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onSetSpeed: (Float) -> Unit,
+    onScheduleSleepTimer: (Int) -> Unit,
+    onCancelSleepTimer: () -> Unit
 ) {
     var positionMs by remember(track.id) { mutableFloatStateOf(0f) }
     var durationMs by remember(track.id) { mutableFloatStateOf(0f) }
     var userSeeking by remember { mutableStateOf(false) }
+    var speedMenuOpen by remember { mutableStateOf(false) }
+    var sleepMenuOpen by remember { mutableStateOf(false) }
 
     // Poll the controller for real position/duration — Media3 doesn't push
     // per-second updates on its own, so this is the standard approach.
@@ -154,21 +181,29 @@ fun NowPlayingScreen(
                 Text(formatDuration(durationMs.toLong()), style = MaterialTheme.typography.bodyMedium)
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
+            // Primary transport row — shuffle/prev/play/next/repeat, the
+            // layout every mainstream player uses.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onToggleFavorite) {
+                IconButton(onClick = onToggleShuffle) {
                     Icon(
-                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurface
+                        Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (shuffleEnabled) NeonCyan else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
+                IconButton(onClick = onSkipPrevious, enabled = hasPrevious) {
+                    Icon(
+                        Icons.Filled.SkipPrevious,
+                        contentDescription = "Previous",
+                        tint = if (hasPrevious) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 IconButton(
                     onClick = { PlayerManager.togglePlayPause() },
                     modifier = Modifier
@@ -182,6 +217,78 @@ fun NowPlayingScreen(
                         tint = VoidBlack,
                         modifier = Modifier.size(36.dp)
                     )
+                }
+                IconButton(onClick = onSkipNext, enabled = hasNext) {
+                    Icon(
+                        Icons.Filled.SkipNext,
+                        contentDescription = "Next",
+                        tint = if (hasNext) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onCycleRepeat) {
+                    Icon(
+                        if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                        contentDescription = "Repeat",
+                        tint = if (repeatMode != Player.REPEAT_MODE_OFF) NeonCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Secondary row — favorite, speed, sleep timer, download.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        tint = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Box {
+                    IconButton(onClick = { speedMenuOpen = true }) {
+                        Icon(Icons.Filled.Speed, contentDescription = "Playback speed")
+                    }
+                    DropdownMenu(expanded = speedMenuOpen, onDismissRequest = { speedMenuOpen = false }) {
+                        SPEED_PRESETS.forEach { speed ->
+                            DropdownMenuItem(
+                                text = { Text("${speed}x" + if (speed == 1f) " (Normal)" else "") },
+                                onClick = { onSetSpeed(speed); speedMenuOpen = false }
+                            )
+                        }
+                    }
+                }
+                if (playbackSpeed != 1f) {
+                    Text("${playbackSpeed}x", style = MaterialTheme.typography.labelSmall, color = NeonCyan)
+                }
+
+                Box {
+                    IconButton(onClick = { sleepMenuOpen = true }) {
+                        Icon(
+                            Icons.Filled.Timer,
+                            contentDescription = "Sleep timer",
+                            tint = if (sleepTimerEndsAtMillis != null) NeonCyan else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    DropdownMenu(expanded = sleepMenuOpen, onDismissRequest = { sleepMenuOpen = false }) {
+                        if (sleepTimerEndsAtMillis != null) {
+                            DropdownMenuItem(
+                                text = { Text("Turn off timer") },
+                                onClick = { onCancelSleepTimer(); sleepMenuOpen = false }
+                            )
+                        }
+                        SLEEP_TIMER_OPTIONS.forEach { minutes ->
+                            DropdownMenuItem(
+                                text = { Text("$minutes min") },
+                                onClick = { onScheduleSleepTimer(minutes); sleepMenuOpen = false }
+                            )
+                        }
+                    }
                 }
 
                 IconButton(onClick = onDownload, enabled = isDownloadable) {

@@ -9,7 +9,7 @@ android {
     namespace = "com.ciphertun.aetherwave"
     // Bump compileSdk to whatever Android Studio currently offers as stable —
     // 34 is used here as a safe, long-established baseline.
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.ciphertun.aetherwave"
@@ -19,8 +19,8 @@ android {
         // nothing — it just excludes Android 7.0/7.1 (API 24-25) users.
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         // Free, instant sign-up at https://developer.jamendo.com — no cost, no approval wait.
         // This is the only credential the app needs — Internet Archive and Apple's
@@ -44,10 +44,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
+    kotlinOptions {
+        jvmTarget = "17"
     }
     packaging {
         resources {
