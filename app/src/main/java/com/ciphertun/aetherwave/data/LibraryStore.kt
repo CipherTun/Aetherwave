@@ -127,7 +127,4 @@ object LibraryStore {
         persist(current.copy(favoriteIds = next))
     }
 
-    suspend fun setWifiOnly(enabled: Boolean) {
-        persist(_snapshot.value.copy(downloadOverWifiOnly = enabled))
-    }
 }

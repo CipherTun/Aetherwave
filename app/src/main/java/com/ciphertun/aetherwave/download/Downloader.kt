@@ -86,7 +86,6 @@ class Downloader(private val context: Context) {
         fileName: String,
         mimeType: String
     ): Long {
-        val wifiOnly = LibraryStore.snapshot.value.downloadOverWifiOnly
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(title)
             .setDescription(description)
@@ -96,8 +95,6 @@ class Downloader(private val context: Context) {
             // apps' MediaStore queries both find this file AND know how to
             // decode it.
             .setMimeType(mimeType)
-            .setAllowedOverMetered(!wifiOnly)
-            .setAllowedOverRoaming(!wifiOnly)
 
         return manager.enqueue(request)
     }

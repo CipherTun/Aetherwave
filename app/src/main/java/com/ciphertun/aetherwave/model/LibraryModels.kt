@@ -36,5 +36,4 @@ data class LibraryEntry(
 data class LibrarySnapshot(
     val entries: List<LibraryEntry> = emptyList(),
     val favoriteIds: Set<String> = emptySet(),
-    val downloadOverWifiOnly: Boolean = false
 )
