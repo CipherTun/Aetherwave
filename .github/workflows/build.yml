@@ -1,4 +1,4 @@
-name: Aetherwave Production Build
+name: Aetherwave Build
 
 on:
   push:
@@ -14,6 +14,7 @@ env:
 jobs:
   android:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -35,7 +36,7 @@ jobs:
       - name: Generate native Flutter project
         run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
 
-      - name: Apply production platform configuration
+      - name: Apply platform configuration
         run: python3 tool/setup.py
 
       - name: Resolve dependencies
@@ -44,9 +45,9 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
-      - name: Build release APK
+      - name: Build Android debug APK
         run: >-
-          flutter build apk --release
+          flutter build apk --debug
           --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
           --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
           --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
@@ -55,27 +56,15 @@ jobs:
           --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
 
-      - name: Build Play Store App Bundle
-        run: >-
-          flutter build appbundle --release
-          --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
-          --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
-          --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
-          --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }}
-          --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }}
-          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-          --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-
-      - name: Upload Android artifacts
+      - name: Upload Android debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: aetherwave-android-production
-          path: |
-            build/app/outputs/flutter-apk/*.apk
-            build/app/outputs/bundle/release/*.aab
+          name: aetherwave-android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
 
   ios:
     runs-on: macos-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -90,7 +79,7 @@ jobs:
       - name: Generate native Flutter project
         run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
 
-      - name: Apply production platform configuration
+      - name: Apply platform configuration
         run: python3 tool/setup.py
 
       - name: Resolve dependencies
@@ -99,7 +88,7 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
-      - name: Build iOS release
+      - name: Build iOS unsigned release
         run: >-
           flutter build ios --release --no-codesign
           --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
@@ -110,8 +99,8 @@ jobs:
           --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
 
-      - name: Upload iOS artifact
+      - name: Upload iOS unsigned artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aetherwave-ios-production
+          name: aetherwave-ios-unsigned
           path: build/ios/iphoneos/Runner.app
