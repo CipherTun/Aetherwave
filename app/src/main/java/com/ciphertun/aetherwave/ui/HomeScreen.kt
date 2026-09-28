@@ -43,11 +43,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 
-private enum class Tab { MUSIC, PODCASTS, LIBRARY }
+private enum class Tab { HOME, EXPLORE, DOWNLOADS, LIBRARY }
 
 @Composable
 fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
-    var tab by remember { mutableStateOf(Tab.MUSIC) }
+    var tab by remember { mutableStateOf(Tab.HOME) }
     var playerExpanded by remember { mutableStateOf(false) }
     val musicState by viewModel.music.collectAsState()
     val podcastState by viewModel.podcasts.collectAsState()
@@ -61,11 +61,24 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
     val sleepTimerEndsAt by PlayerManager.sleepTimerEndsAtMillis.collectAsState()
     val librarySnapshot by LibraryStore.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
+    val appContext = LocalContext.current
+    val smartDownloader = remember { Downloader(appContext) }
+    val recentlyPlayed by PlayerManager.recentlyPlayed.collectAsState()
 
     // Polls DownloadManager for real progress/completion regardless of which
     // tab is showing, so a download finished in the background (or while the
     // user was on a different tab) still shows up promptly everywhere —
     // the "already downloaded" badge on search rows included.
+    LaunchedEffect(librarySnapshot.smartDownloadsEnabled, recentlyPlayed) {
+        if (librarySnapshot.smartDownloadsEnabled && recentlyPlayed.isNotEmpty()) {
+            recentlyPlayed.take(librarySnapshot.smartDownloadLimit.coerceIn(1, 50)).forEach { track ->
+                if (!track.isDownloadable) return@forEach
+                val exists = LibraryStore.snapshot.value.entries.any { it.id == track.id && (it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.COMPLETE) }
+                if (!exists) smartDownloader.downloadTrack(track)
+            }
+        }
+    }
+
     LaunchedEffect(librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
         while (librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
             delay(1200)
@@ -86,21 +99,27 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
                     }
                     NavigationBar(containerColor = SurfaceElevated) {
                         NavigationBarItem(
-                            selected = tab == Tab.MUSIC,
-                            onClick = { tab = Tab.MUSIC },
-                            icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Music") },
-                            label = { Text("Music") }
+                            selected = tab == Tab.HOME,
+                            onClick = { tab = Tab.HOME },
+                            icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                            label = { Text("Home") }
                         )
                         NavigationBarItem(
-                            selected = tab == Tab.PODCASTS,
-                            onClick = { tab = Tab.PODCASTS },
-                            icon = { Icon(Icons.Filled.Podcasts, contentDescription = "Podcasts") },
-                            label = { Text("Podcasts") }
+                            selected = tab == Tab.EXPLORE,
+                            onClick = { tab = Tab.EXPLORE },
+                            icon = { Icon(Icons.Filled.Explore, contentDescription = "Explore") },
+                            label = { Text("Explore") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == Tab.DOWNLOADS,
+                            onClick = { tab = Tab.DOWNLOADS },
+                            icon = { Icon(Icons.Filled.Download, contentDescription = "Downloads") },
+                            label = { Text("Downloads") }
                         )
                         NavigationBarItem(
                             selected = tab == Tab.LIBRARY,
                             onClick = { tab = Tab.LIBRARY },
-                            icon = { Icon(Icons.Filled.Download, contentDescription = "Library") },
+                            icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Library") },
                             label = { Text("Library") }
                         )
                     }
@@ -109,18 +128,22 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    Tab.MUSIC -> MusicTab(
+                    Tab.HOME -> MusicTab(
                         state = musicState,
                         onSearch = viewModel::searchMusic,
                         onSetCountry = viewModel::setMusicCountry
                     )
-                    Tab.PODCASTS -> PodcastTab(
-                        state = podcastState,
-                        onSearch = viewModel::searchPodcasts,
-                        onOpenShow = viewModel::openPodcast,
-                        onBack = viewModel::closePodcast,
-                        onSetCountry = viewModel::setCountry
+                    Tab.EXPLORE -> ExploreTab(
+                        musicState = musicState,
+                        podcastState = podcastState,
+                        onMusicSearch = viewModel::searchMusic,
+                        onMusicCountry = viewModel::setMusicCountry,
+                        onPodcastSearch = viewModel::searchPodcasts,
+                        onOpenPodcast = viewModel::openPodcast,
+                        onClosePodcast = viewModel::closePodcast,
+                        onPodcastCountry = viewModel::setCountry
                     )
+                    Tab.DOWNLOADS -> DownloadsTab()
                     Tab.LIBRARY -> LibraryTab()
                 }
             }
@@ -170,12 +193,38 @@ private fun greeting(): String = when (LocalTime.now().hour) {
 }
 
 @Composable
+private fun ExploreTab(
+    musicState: MusicUiState,
+    podcastState: PodcastUiState,
+    onMusicSearch: (String) -> Unit,
+    onMusicCountry: (String) -> Unit,
+    onPodcastSearch: (String) -> Unit,
+    onOpenPodcast: (PodcastShow) -> Unit,
+    onClosePodcast: () -> Unit,
+    onPodcastCountry: (String) -> Unit
+) {
+    var mode by rememberSaveable { mutableStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            SegmentedButton(selected = mode == 0, onClick = { mode = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Music") }
+            SegmentedButton(selected = mode == 1, onClick = { mode = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Podcasts") }
+        }
+        if (mode == 0) MusicTab(musicState, onMusicSearch, onMusicCountry)
+        else PodcastTab(podcastState, onPodcastSearch, onOpenPodcast, onClosePodcast, onPodcastCountry)
+    }
+}
+
+@Composable
 private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCountry: (String) -> Unit) {
     val context = LocalContext.current
     val downloader = remember { Downloader(context) }
     val scope = rememberCoroutineScope()
     val recentlyPlayed by PlayerManager.recentlyPlayed.collectAsState()
     val isBrowsingHome = state.query.isBlank()
+    var sourceFilter by rememberSaveable { mutableStateOf("ALL") }
+    val filteredTracks = remember(state.tracks, sourceFilter) {
+        if (sourceFilter == "ALL") state.tracks else state.tracks.filter { it.source.name == sourceFilter }
+    }
 
     Column(Modifier.fillMaxSize()) {
         SearchField(
@@ -187,15 +236,26 @@ private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCount
             state.loadState == LoadState.LOADING && isBrowsingHome && state.trending.isEmpty() -> ShimmerList()
             !isBrowsingHome && state.loadState == LoadState.LOADING -> ShimmerList()
             !isBrowsingHome && state.tracks.isEmpty() -> EmptyState("No tracks found — try another search")
-            !isBrowsingHome -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                itemsIndexed(state.tracks, key = { _, t -> t.id }) { index, track ->
+            !isBrowsingHome -> {
+                Column {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(listOf("ALL" to "All", "JAMENDO" to "Jamendo", "ARCHIVE_ORG" to "Archive", "OPENVERSE" to "Openverse"), key = { it.first }) { (code, label) ->
+                            FilterChip(selected = sourceFilter == code, onClick = { sourceFilter = code }, label = { Text(label) })
+                        }
+                    }
+                    if (filteredTracks.isEmpty()) EmptyState("No results for this source") else LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                        itemsIndexed(filteredTracks, key = { _, t -> t.id }) { index, track ->
                     TrackRow(
                         track = track,
-                        onPlay = { PlayerManager.playQueue(state.tracks, index) },
+                        onPlay = { PlayerManager.playQueue(filteredTracks, index) },
                         onDownload = if (track.isDownloadable) {
                             { scope.launch { downloader.downloadTrack(track) } }
                         } else null
-                    )
+                        }
+                    }
                 }
             }
             else -> {
@@ -470,6 +530,8 @@ private fun SourceBadge(source: Track.Source) {
         Track.Source.ARCHIVE_ORG -> "Internet Archive"
         Track.Source.OPENVERSE -> "Openverse"
         Track.Source.PODCAST -> "Podcast"
+        Track.Source.LOCAL -> "On device"
+        Track.Source.DIRECT -> "Direct download"
     }
     Text(
         label,

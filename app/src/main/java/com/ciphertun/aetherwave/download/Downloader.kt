@@ -48,6 +48,7 @@ class Downloader(private val context: Context) {
                 artist = track.artist,
                 artworkUrl = track.artworkUrl,
                 source = track.source,
+                downloadUrl = url,
                 status = DownloadStatus.PENDING
             )
         )
@@ -72,10 +73,58 @@ class Downloader(private val context: Context) {
                 artist = episode.podcastTitle,
                 artworkUrl = episode.artworkUrl,
                 source = Track.Source.PODCAST,
+                downloadUrl = episode.audioUrl,
                 status = DownloadStatus.PENDING
             )
         )
         return downloadId
+    }
+
+    suspend fun downloadDirect(
+        url: String,
+        title: String,
+        artist: String,
+        extension: String = "mp3"
+    ): Long? {
+        val cleanUrl = url.trim()
+        if (!cleanUrl.startsWith("https://") && !cleanUrl.startsWith("http://")) return null
+        val safeExt = extension.lowercase().filter { it.isLetterOrDigit() }.take(5).ifBlank { "mp3" }
+        val downloadId = enqueue(
+            url = cleanUrl,
+            title = title.ifBlank { "Aetherwave download" },
+            description = artist.ifBlank { "Direct media" },
+            subDir = Environment.DIRECTORY_MUSIC,
+            fileName = safeFileName(artist.ifBlank { "Unknown artist" }, title.ifBlank { "download" }, safeExt),
+            mimeType = mimeTypeFor(safeExt)
+        )
+        LibraryStore.addPending(
+            LibraryEntry(
+                id = "direct:$downloadId",
+                downloadId = downloadId,
+                title = title.ifBlank { "Aetherwave download" },
+                artist = artist.ifBlank { "Direct media" },
+                artworkUrl = null,
+                source = Track.Source.DIRECT,
+                downloadUrl = cleanUrl,
+                status = DownloadStatus.PENDING
+            )
+        )
+        return downloadId
+    }
+
+    suspend fun retry(entry: LibraryEntry): Long? {
+        val url = entry.downloadUrl ?: return null
+        val ext = guessExtension(url)
+        val id = enqueue(
+            url = url,
+            title = entry.title,
+            description = entry.artist,
+            subDir = if (entry.source == Track.Source.PODCAST) Environment.DIRECTORY_PODCASTS else Environment.DIRECTORY_MUSIC,
+            fileName = safeFileName(entry.artist, entry.title, ext),
+            mimeType = mimeTypeFor(ext)
+        )
+        LibraryStore.replaceDownloadId(entry.id, id)
+        return id
     }
 
     private fun enqueue(
@@ -86,7 +135,6 @@ class Downloader(private val context: Context) {
         fileName: String,
         mimeType: String
     ): Long {
-        val wifiOnly = LibraryStore.snapshot.value.downloadOverWifiOnly
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(title)
             .setDescription(description)
@@ -96,8 +144,8 @@ class Downloader(private val context: Context) {
             // apps' MediaStore queries both find this file AND know how to
             // decode it.
             .setMimeType(mimeType)
-            .setAllowedOverMetered(!wifiOnly)
-            .setAllowedOverRoaming(!wifiOnly)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
 
         return manager.enqueue(request)
     }

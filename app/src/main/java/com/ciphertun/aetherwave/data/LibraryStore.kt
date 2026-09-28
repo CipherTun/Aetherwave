@@ -105,6 +105,14 @@ object LibraryStore {
         persist(current.copy(entries = merged))
     }
 
+    suspend fun replaceDownloadId(id: String, newDownloadId: Long) {
+        val current = _snapshot.value
+        val updated = current.entries.map {
+            if (it.id == id) it.copy(downloadId = newDownloadId, status = DownloadStatus.PENDING, progressPercent = 0) else it
+        }
+        persist(current.copy(entries = updated))
+    }
+
     suspend fun remove(id: String) {
         val current = _snapshot.value
         val target = current.entries.firstOrNull { it.id == id } ?: return
@@ -127,7 +135,7 @@ object LibraryStore {
         persist(current.copy(favoriteIds = next))
     }
 
-    suspend fun setWifiOnly(enabled: Boolean) {
-        persist(_snapshot.value.copy(downloadOverWifiOnly = enabled))
+    suspend fun setSmartDownloads(enabled: Boolean) {
+        persist(_snapshot.value.copy(smartDownloadsEnabled = enabled))
     }
 }

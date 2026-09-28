@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +34,7 @@ fun LibraryTab() {
     val snapshot by LibraryStore.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
     var favoritesOnly by remember { mutableStateOf(false) }
+    var localMusic by remember { mutableStateOf(false) }
 
     // Real progress polling lives in HomeScreen (runs regardless of which
     // tab is on screen) — this tab just reads whatever LibraryStore has.
@@ -50,10 +50,28 @@ fun LibraryTab() {
         ) {
             Text("Library", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
             FilterChip(
+                selected = localMusic,
+                onClick = { localMusic = !localMusic },
+                label = { Text("Local") },
+                leadingIcon = { Icon(Icons.Filled.DownloadDone, contentDescription = null) }
+            )
+            Spacer(Modifier.width(8.dp))
+            FilterChip(
                 selected = favoritesOnly,
                 onClick = { favoritesOnly = !favoritesOnly },
                 label = { Text("Favorites") },
                 leadingIcon = { Icon(Icons.Filled.Favorite, contentDescription = null, tint = if (favoritesOnly) NeonPink else LocalContentColor.current) }
+            )
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Smart downloads", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Switch(
+                checked = snapshot.smartDownloadsEnabled,
+                onCheckedChange = { scope.launch { LibraryStore.setSmartDownloads(it) } }
             )
         }
 
@@ -70,7 +88,9 @@ fun LibraryTab() {
             )
         }
 
-        if (entries.isEmpty()) {
+        if (localMusic) {
+            LocalMusicSection()
+        } else if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
                     if (favoritesOnly) "No favorites yet — heart a downloaded track to pin it here"

@@ -9,7 +9,7 @@ android {
     namespace = "com.ciphertun.aetherwave"
     // Bump compileSdk to whatever Android Studio currently offers as stable —
     // 34 is used here as a safe, long-established baseline.
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ciphertun.aetherwave"
@@ -44,8 +44,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
     packaging {
         resources {

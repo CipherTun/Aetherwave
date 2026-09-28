@@ -21,7 +21,7 @@ data class Track(
     val licenseNote: String
 ) {
     @Serializable
-    enum class Source { JAMENDO, ARCHIVE_ORG, OPENVERSE, PODCAST }
+    enum class Source { JAMENDO, ARCHIVE_ORG, OPENVERSE, PODCAST, LOCAL, DIRECT }
 
     val isDownloadable: Boolean get() = downloadUrl != null
 }

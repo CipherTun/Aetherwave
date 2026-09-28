@@ -94,3 +94,10 @@ Written in a sandbox with no network/Android SDK access, so **none of this has b
 2. A real system equalizer (`android.media.audiofx.Equalizer` on the ExoPlayer session) and adaptive Now-Playing color theming from album art (Spotify/YT Music's signature look) — both scoped out of this pass to keep it shippable, both realistic next additions.
 3. Swap the manual DI in `NetworkModule` for Koin once the app grows past one screen's worth of dependencies.
 4. If genre-based African-music discovery matters more than volume, try seeding Music search with specific tags (amapiano, afrobeats, gqom, kwaito, highlife) rather than relying on the country rail alone — worth testing which actually returns results once you can hit the live API.
+
+
+## Aetherwave functional architecture
+
+The app now uses four primary surfaces: Home, Explore, Downloads, and Library. Explore contains Music and Podcasts, Downloads exposes the persistent queue and direct authorized-media URL workflow, and Library includes Favorites plus local-device audio indexing through MediaStore.
+
+Downloads are only surfaced from providers that expose a downloadable URL or from direct media URLs supplied by the user. The app does not bypass provider access controls. Android DownloadManager provides background transfer, notification, retry/resume behavior supported by the platform, and public Music/Podcasts storage.

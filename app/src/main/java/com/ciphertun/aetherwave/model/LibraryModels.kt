@@ -26,6 +26,7 @@ data class LibraryEntry(
     val artworkUrl: String?,
     val source: Track.Source,
     val localUri: String? = null,
+    val downloadUrl: String? = null,
     val status: DownloadStatus = DownloadStatus.PENDING,
     val progressPercent: Int = 0,
     val downloadedAtMillis: Long = System.currentTimeMillis()
@@ -36,5 +37,6 @@ data class LibraryEntry(
 data class LibrarySnapshot(
     val entries: List<LibraryEntry> = emptyList(),
     val favoriteIds: Set<String> = emptySet(),
-    val downloadOverWifiOnly: Boolean = false
+    val smartDownloadsEnabled: Boolean = false,
+    val smartDownloadLimit: Int = 10
 )
