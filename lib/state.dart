@@ -75,6 +75,46 @@ class AppState extends ChangeNotifier {
   Future<void> removeDownload(Track t)async{final f=paths.remove(t.id);downloads.remove(t.id);if(f!=null&&File(f).existsSync())await File(f).delete();_save();}
   Future<void> smartDownload()async{if(!smartDownloads)return;final candidates=[...likes.values,...recent];final seen=<String>{};for(final t in candidates){if(seen.add(t.id)&&canDownload(t)&&!isDownloaded(t))await download(t);}}
   void setSmartDownloads(bool v){smartDownloads=v;p.setBool('smartDownloads',v);notifyListeners();if(v)smartDownload();}
+  List<Track> sortedLibrary(Iterable<Track> source){
+    final result = List<Track>.of(source);
+    switch(sortMode){
+      case 'alpha':
+        result.sort((a,b){
+          final aa='${a.artist} ${a.title}'.toLowerCase();
+          final bb='${b.artist} ${b.title}'.toLowerCase();
+          return aa.compareTo(bb);
+        });
+        break;
+      case 'saved':
+        result.sort((a,b){
+          final ai=downloads.containsKey(a.id) ? 0 : 1;
+          final bi=downloads.containsKey(b.id) ? 0 : 1;
+          return ai.compareTo(bi);
+        });
+        break;
+      case 'recent':
+      default:
+        final order=<String,int>{};
+        for(var i=0;i<recent.length;i++){
+          order[recent[i].id]=i;
+        }
+        result.sort((a,b){
+          final ai=order[a.id] ?? 999999;
+          final bi=order[b.id] ?? 999999;
+          return ai.compareTo(bi);
+        });
+    }
+    return result;
+  }
+
+  void toggleFollow(String artist){
+    final name=artist.trim();
+    if(name.isEmpty)return;
+    follows.contains(name) ? follows.remove(name) : follows.add(name);
+    p.setStringList('follows',follows.toList());
+    _save();
+  }
+
   void setSort(String v){sortMode=v;p.setString('sortMode',v);notifyListeners();}
   void toggleGenre(String g){genres.contains(g)?genres.remove(g):genres.add(g);p.setStringList('genres',genres.toList());notifyListeners();}
   List<Track> recommendations(){final seed=[...likes.values,...recent];final artists=seed.map((t)=>t.artist.toLowerCase()).toSet();final gs=seed.map((t)=>t.genre.toLowerCase()).where((x)=>x.isNotEmpty).toSet();final pool=[...likes.values,...recent,...downloads.values];pool.sort((a,b){int score(Track t){var n=0;if(artists.contains(t.artist.toLowerCase()))n+=5;if(gs.contains(t.genre.toLowerCase()))n+=3;if(genres.contains(t.genre))n+=6;if(t.preview)n--;if(isDownloaded(t))n++;return n;}return score(b).compareTo(score(a));});final seen=<String>{};return [for(final t in pool)if(seen.add(t.id))t];}

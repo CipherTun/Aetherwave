@@ -34,8 +34,33 @@ void trackMenu(BuildContext context,Track t){
 }
 
 void pickPlaylist(BuildContext context,Track t){final s=context.read<AppState>();showModalBottomSheet(context:context,showDragHandle:true,builder:(_)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[ListTile(leading:const Icon(Icons.add),title:const Text('New playlist'),onTap:()async{Navigator.pop(context);final n=await askName(context);if(n!=null&&n.trim().isNotEmpty){s.createPlaylist(n);s.addToPlaylist(n.trim(),t);}}),for(final n in s.playlists.keys)ListTile(leading:const Icon(Icons.queue_music),title:Text(n),onTap:(){s.addToPlaylist(n,t);Navigator.pop(context);toast(context,'Added to $n');})])));}
-Future<String?> askName(BuildContext c,{String title='Playlist name'}){final x=TextEditingController();return showDialog<String>(context:c,builder:(_)=>AlertDialog(title:Text(title),content:TextField(controller:x,autofocus:true),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(context,x.text),child:const Text('Save'))]));}
+Future<String?> askName(
+  BuildContext c, {
+  String title = 'Playlist name',
+}) {
+  final controller = TextEditingController();
 
+  return showDialog<String>(
+    context: c,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
 class TrackTile extends StatelessWidget {
   final List<Track> list;
   final int i;

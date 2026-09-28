@@ -81,7 +81,7 @@ class _ShelfViewState extends State<ShelfView> {
   );
 }
 
-class SearchPage extends StatelessWidget{const SearchPage({super.key});@override Widget build(BuildContext c)=>const Scaffold(appBar:AppBar(title:Text('Search')),body:SearchTab());}
+class SearchPage extends StatelessWidget{const SearchPage({super.key});@override Widget build(BuildContext c)=>Scaffold(appBar:AppBar(title:const Text('Search')),body:const SearchTab());}
 class SearchTab extends StatefulWidget {
   const SearchTab({super.key});
   @override State<SearchTab> createState() => _SearchTabState();
@@ -221,7 +221,7 @@ class _LibraryCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Icon(entry.icon, size: 27, color: scheme.primary),
-            Row(children: [Expanded(child: Text(entry.title, style: const TextStyle(fontWeight: FontWeight.w750))), const Icon(Icons.arrow_forward_ios_rounded, size: 14)]),
+            Row(children: [Expanded(child: Text(entry.title, style: const TextStyle(fontWeight: FontWeight.w700))), const Icon(Icons.arrow_forward_ios_rounded, size: 14)]),
           ]),
         ),
       ),
@@ -386,7 +386,7 @@ class PlayerPage extends StatelessWidget {
         return Column(children: [Slider(value: duration.inMilliseconds <= 0 ? 0 : value, max: max, onChanged: (v) => state.player.seek(Duration(milliseconds: v.toInt()))), Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_fmt(position)), Text(_fmt(duration))])]);
       }),
       Row(mainAxisAlignment: MainAxisAlignment.center, children: [IconButton(onPressed: state.prev, icon: const Icon(Icons.skip_previous_rounded), iconSize: 38), StreamBuilder<bool>(stream: state.player.playingStream, initialData: state.player.playing, builder: (context, snap) => IconButton.filled(onPressed: () => snap.data == true ? state.player.pause() : state.player.play(), icon: Icon(snap.data == true ? Icons.pause : Icons.play_arrow), iconSize: 40)), IconButton(onPressed: state.next, icon: const Icon(Icons.skip_next_rounded), iconSize: 38)]),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [IconButton(onPressed: state.toggleShuffle, icon: Icon(Icons.shuffle, color: state.shuffle ? accent : null)), IconButton(onPressed: () => lyricsSheet(context, track), icon: const Icon(Icons.lyrics_outlined)), IconButton(onPressed: () => sleepSheet(context), icon: const Icon(Icons.bedtime_outlined)), PopupMenuButton<double>(initialValue: state.speed, onSelected: state.setSpeed, itemBuilder: (_) => [.75, 1, 1.25, 1.5, 2].map((v) => PopupMenuItem(value: v, child: Text('${v}x'))).toList(), child: const Icon(Icons.speed)), IconButton(onPressed: state.cycleRepeat, icon: Icon(state.repeat == 2 ? Icons.repeat_one : Icons.repeat, color: state.repeat > 0 ? accent : null))]),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [IconButton(onPressed: state.toggleShuffle, icon: Icon(Icons.shuffle, color: state.shuffle ? accent : null)), IconButton(onPressed: () => lyricsSheet(context, track), icon: const Icon(Icons.lyrics_outlined)), IconButton(onPressed: () => sleepSheet(context), icon: const Icon(Icons.bedtime_outlined)), PopupMenuButton<double>(initialValue: state.speed, onSelected: state.setSpeed, itemBuilder: (_) => <double>[0.75, 1.0, 1.25, 1.5, 2.0].map((v) => PopupMenuItem<double>(value: v, child: Text('${v}x'))).toList(), child: const Icon(Icons.speed)), IconButton(onPressed: state.cycleRepeat, icon: Icon(state.repeat == 2 ? Icons.repeat_one : Icons.repeat, color: state.repeat > 0 ? accent : null))]),
       const Spacer(),
     ])));
   }
@@ -400,7 +400,7 @@ class SettingsPage extends StatelessWidget {
     final state = context.watch<AppState>();
     return Scaffold(appBar: AppBar(title: const Text('Settings')), body: ListView(children: [
       const ListTile(title: Text('Personalization', style: TextStyle(fontWeight: FontWeight.w800))),
-      Wrap(padding: const EdgeInsets.symmetric(horizontal: 16), spacing: 8, children: [for (final genre in ['Hip-Hop','Pop','R&B','Afrobeats','Electronic','Rock','Jazz','Lo-fi','Classical','Country']) FilterChip(label: Text(genre), selected: state.genres.contains(genre), onSelected: (_) => state.toggleGenre(genre))]),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Wrap(spacing: 8, children: [for (final genre in ['Hip-Hop','Pop','R&B','Afrobeats','Electronic','Rock','Jazz','Lo-fi','Classical','Country']) FilterChip(label: Text(genre), selected: state.genres.contains(genre), onSelected: (_) => state.toggleGenre(genre))])), 
       const Divider(),
       SwitchListTile(title: const Text('Smart downloads'), subtitle: const Text('Automatically save permitted tracks from your likes and recent listening.'), value: state.smartDownloads, onChanged: state.setSmartDownloads),
       ListTile(title: const Text('Library sorting'), subtitle: Text(state.sortMode), trailing: DropdownButton<String>(value: state.sortMode, items: const [DropdownMenuItem(value: 'recent', child: Text('Recently played')), DropdownMenuItem(value: 'saved', child: Text('Recently saved')), DropdownMenuItem(value: 'alpha', child: Text('A–Z'))], onChanged: (v) { if (v != null) state.setSort(v); })),
