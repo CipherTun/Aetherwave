@@ -1,0 +1,350 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show User, AuthException;
+import 'api.dart';
+import 'cloud.dart';
+
+class AppState extends ChangeNotifier {
+  final player = AudioPlayer();
+  late SharedPreferences p;
+  List<Track> queue = [], recent = [], local = [];
+  Set<String> follows = {};
+  int index = 0, repeat = 0; // repeat: 0 off, 1 all, 2 one
+  bool shuffle = false;
+  double speed = 1;
+  Map<String, Track> likes = {}, downloads = {};
+  Map<String, String> paths = {};
+  Map<String, double> progress = {};
+  Map<String, List<Track>> playlists = {};
+  String country = 'US', countryLabel = '';
+  ThemeMode theme = ThemeMode.dark;
+  List<String> searches = [];
+  Timer? _sleep;
+  DateTime? sleepAt;
+
+  Track? get current => queue.isEmpty ? null : queue[index];
+
+  List<Track> _rl(String k) => [for (final e in jsonDecode(p.getString(k) ?? '[]')) Track.fromJson(e)];
+  String _js(Iterable<Track> l) => jsonEncode([for (final t in l) t.toJson()]);
+
+  Future<void> load() async {
+    p = await SharedPreferences.getInstance();
+    likes = {for (final t in _rl('likes')) t.id: t};
+    downloads = {for (final t in _rl('downloads')) t.id: t};
+    recent = _rl('recent');
+    paths = Map<String, String>.from(jsonDecode(p.getString('paths') ?? '{}'));
+    final pl = jsonDecode(p.getString('playlists') ?? '{}') as Map;
+    playlists = {for (final e in pl.entries) e.key: [for (final j in e.value) Track.fromJson(j)]};
+    country = p.getString('country') ?? (PlatformDispatcher.instance.locale.countryCode ?? 'US');
+    countryLabel = p.getString('countryLabel') ?? country;
+    theme = ThemeMode.values[p.getInt('theme') ?? 2];
+    speed = p.getDouble('speed') ?? 1;
+    searches = p.getStringList('searches') ?? [];
+    follows = (p.getStringList('follows') ?? []).toSet();
+    local = _rl('local');
+    if (user != null) pull();
+    player.playerStateStream.listen((s) {
+      if (s.processingState == ProcessingState.completed) {
+        if (repeat == 2) {
+          player.seek(Duration.zero);
+          player.play();
+        } else {
+          next(auto: true);
+        }
+      }
+    });
+  }
+
+  void _save({bool sync = true}) {
+    p.setStringList('follows', follows.toList());
+    p.setString('local', _js(local));
+    p.setString('likes', _js(likes.values));
+    p.setString('downloads', _js(downloads.values));
+    p.setString('recent', _js(recent));
+    p.setString('paths', jsonEncode(paths));
+    p.setString('playlists', jsonEncode({for (final e in playlists.entries) e.key: [for (final t in e.value) t.toJson()]}));
+    notifyListeners();
+    if (sync) push();
+  }
+
+  AudioSource _src(Track t) {
+    final tag = MediaItem(id: t.id, title: t.title, artist: t.artist, album: t.src, artUri: Uri.tryParse(t.image));
+    if (t.src == 'Device') return AudioSource.file(t.url, tag: tag);
+    final f = paths[t.id];
+    if (f != null && File(f).existsSync()) return AudioSource.file(f, tag: tag);
+    return AudioSource.uri(Uri.parse(t.url), tag: tag);
+  }
+
+  Future<void> play(List<Track> list, int i) async {
+    queue = List.of(list);
+    index = i;
+    recent = [queue[i], ...recent.where((t) => t.id != queue[i].id)].take(30).toList();
+    _save();
+    try {
+      await player.setAudioSource(_src(queue[i]));
+      await player.setSpeed(speed);
+      player.play();
+    } catch (_) {}
+  }
+
+  Future<void> next({bool auto = false}) async {
+    if (queue.isEmpty) return;
+    var n = shuffle ? Random().nextInt(queue.length) : index + 1;
+    if (n >= queue.length) {
+      if (repeat == 1 || !auto) {
+        n = 0;
+      } else {
+        return;
+      }
+    }
+    await play(queue, n);
+  }
+
+  Future<void> prev() async {
+    if (player.position.inSeconds > 3 || index == 0) return player.seek(Duration.zero);
+    await play(queue, index - 1);
+  }
+
+  void playNext(Track t) {
+    queue.insert(queue.isEmpty ? 0 : index + 1, t);
+    notifyListeners();
+  }
+
+  void addToQueue(Track t) {
+    queue.add(t);
+    notifyListeners();
+  }
+
+  void addSearch(String q) {
+    searches = [q, ...searches.where((x) => x != q)].take(12).toList();
+    p.setStringList('searches', searches);
+    notifyListeners();
+  }
+
+  void clearSearches() {
+    searches = [];
+    p.remove('searches');
+    notifyListeners();
+  }
+
+  void toggleShuffle() {
+    shuffle = !shuffle;
+    notifyListeners();
+  }
+
+  void cycleRepeat() {
+    repeat = (repeat + 1) % 3;
+    notifyListeners();
+  }
+
+  void setSpeed(double v) {
+    speed = v;
+    player.setSpeed(v);
+    p.setDouble('speed', v);
+    notifyListeners();
+  }
+
+  void setSleep(int? min) {
+    _sleep?.cancel();
+    sleepAt = min == null ? null : DateTime.now().add(Duration(minutes: min));
+    if (min != null) {
+      _sleep = Timer(Duration(minutes: min), () {
+        player.pause();
+        sleepAt = null;
+        notifyListeners();
+      });
+    }
+    notifyListeners();
+  }
+
+  void setCountry(Country c) {
+    country = c.code;
+    countryLabel = '${c.flag} ${c.name}';
+    p.setString('country', country);
+    p.setString('countryLabel', countryLabel);
+    notifyListeners();
+  }
+
+  void setTheme(ThemeMode m) {
+    theme = m;
+    p.setInt('theme', m.index);
+    notifyListeners();
+  }
+
+  void toggleLike(Track t) {
+    likes.containsKey(t.id) ? likes.remove(t.id) : likes[t.id] = t;
+    _save();
+  }
+
+  void createPlaylist(String n) {
+    if (n.trim().isNotEmpty) playlists.putIfAbsent(n.trim(), () => []);
+    _save();
+  }
+
+  void deletePlaylist(String n) {
+    playlists.remove(n);
+    _save();
+  }
+
+  void addToPlaylist(String n, Track t) {
+    final l = playlists[n]!;
+    if (!l.any((x) => x.id == t.id)) l.add(t);
+    _save();
+  }
+
+  void removeFromPlaylist(String n, Track t) {
+    playlists[n]?.removeWhere((x) => x.id == t.id);
+    _save();
+  }
+
+  bool canDownload(Track t) => t.dl.isNotEmpty;
+  bool isDownloaded(Track t) => paths.containsKey(t.id);
+
+  Future<void> download(Track t) async {
+    if (!canDownload(t) || isDownloaded(t) || progress.containsKey(t.id)) return;
+    progress[t.id] = 0;
+    notifyListeners();
+    final c = http.Client();
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final f = File('${dir.path}/${t.id}.mp3');
+      final res = await c.send(http.Request('GET', Uri.parse(t.dl)));
+      final sink = f.openWrite();
+      var got = 0;
+      await for (final b in res.stream) {
+        sink.add(b);
+        got += b.length;
+        if ((res.contentLength ?? 0) > 0) {
+          progress[t.id] = got / res.contentLength!;
+          notifyListeners();
+        }
+      }
+      await sink.close();
+      paths[t.id] = f.path;
+      downloads[t.id] = t;
+    } catch (_) {}
+    c.close();
+    progress.remove(t.id);
+    _save();
+  }
+
+  Future<void> removeDownload(Track t) async {
+    final f = paths.remove(t.id);
+    downloads.remove(t.id);
+    if (f != null && File(f).existsSync()) File(f).deleteSync();
+    _save();
+  }
+
+  // ---- artists, radio, local files, playlists ----
+  void toggleFollow(String a) {
+    follows.contains(a) ? follows.remove(a) : follows.add(a);
+    _save();
+  }
+
+  Future<void> startRadio(Track t) async {
+    final l = await searchAll(t.artist, country);
+    final mix = [t, ...l.where((x) => x.id != t.id)]..shuffle();
+    mix.remove(t);
+    await play([t, ...mix], 0);
+  }
+
+  Future<void> addLocal() async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
+    if (r == null) return;
+    final dir = await getApplicationDocumentsDirectory();
+    for (final f in r.files) {
+      if (f.path == null) continue;
+      final dest = '${dir.path}/lc_${DateTime.now().microsecondsSinceEpoch}_${f.name}';
+      await File(f.path!).copy(dest);
+      local.add(Track('lc$dest'.hashCode.toString(), 'Device', f.name.replaceAll(RegExp(r'\.\w+$'), ''), 'On this device', '', dest, '', false));
+    }
+    _save();
+  }
+
+  void reorder(String n, int a, int b) {
+    final l = playlists[n]!;
+    if (b > a) b--;
+    l.insert(b, l.removeAt(a));
+    _save();
+  }
+
+  // ---- cloud (Supabase): accounts, sync, shared playlists ----
+  User? get user => sb?.auth.currentUser;
+
+  Map _snap() => {
+        'likes': [for (final t in likes.values) t.toJson()],
+        'playlists': {for (final e in playlists.entries) e.key: [for (final t in e.value) t.toJson()]},
+        'follows': follows.toList(),
+        'searches': searches,
+      };
+
+  Future<void> push() async {
+    final u = user;
+    if (u == null) return;
+    try {
+      await sb!.from('user_data').upsert({'user_id': u.id, 'data': _snap(), 'updated_at': DateTime.now().toIso8601String()});
+    } catch (_) {}
+  }
+
+  Future<void> pull() async {
+    final u = user;
+    if (u == null) return;
+    try {
+      final r = await sb!.from('user_data').select('data').eq('user_id', u.id).maybeSingle();
+      if (r == null) return push();
+      final d = r['data'] as Map;
+      likes = {for (final j in d['likes'] ?? []) '${j['id']}': Track.fromJson(j)};
+      playlists = {for (final e in (d['playlists'] ?? {}).entries) e.key: [for (final j in e.value) Track.fromJson(j)]};
+      follows = {...?(d['follows'] as List?)?.cast<String>()};
+      _save(sync: false);
+    } catch (_) {}
+  }
+
+  Future<String?> auth(String email, String pw, bool signUp) async {
+    try {
+      signUp ? await sb!.auth.signUp(email: email, password: pw) : await sb!.auth.signInWithPassword(email: email, password: pw);
+      await pull();
+      notifyListeners();
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Something went wrong. Check your connection.';
+    }
+  }
+
+  Future<void> signOut() async {
+    await sb?.auth.signOut();
+    notifyListeners();
+  }
+
+  Future<String?> sharePlaylist(String n) async {
+    try {
+      final r = await sb!.from('shared_playlists').insert({'name': n, 'tracks': [for (final t in playlists[n]!) t.toJson()]}).select('id').single();
+      return '${r['id']}';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> importPlaylist(String id) async {
+    try {
+      final r = await sb!.from('shared_playlists').select().eq('id', id).single();
+      playlists[r['name']] = [for (final j in r['tracks']) Track.fromJson(j)];
+      _save();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
