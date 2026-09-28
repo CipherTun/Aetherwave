@@ -17,9 +17,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Request
-import java.net.URLEncoder
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 class MusicRepository(
     private val jamendoApi: com.ciphertun.aetherwave.network.JamendoApi = NetworkModule.jamendoApi,
@@ -192,24 +189,6 @@ class MusicRepository(
         )
     }
 
-    /** Lyrics from the public lyrics.ovh service. A missing/unavailable lyric is treated as no result. */
-    suspend fun lyricsFor(track: Track): String? = withContext(Dispatchers.IO) {
-        runCatching {
-            val artist = URLEncoder.encode(track.artist, "UTF-8").replace("+", "%20")
-            val title = URLEncoder.encode(track.title, "UTF-8").replace("+", "%20")
-            val request = Request.Builder()
-                .url("https://api.lyrics.ovh/v1/$artist/$title")
-                .header("User-Agent", "Aetherwave/1.0")
-                .build()
-            NetworkModule.rssHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                val body = response.body?.string() ?: return@use null
-                Json { ignoreUnknownKeys = true }.decodeFromString(LyricsResponse.serializer(), body).lyrics
-                    ?.takeIf { it.isNotBlank() }
-            }
-        }.getOrNull()
-    }
-
     suspend fun episodesFor(show: PodcastShow): List<PodcastEpisode> = withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder().url(show.feedUrl).build()
@@ -220,6 +199,3 @@ class MusicRepository(
         }.getOrDefault(emptyList())
     }
 }
-
-@Serializable
-private data class LyricsResponse(val lyrics: String? = null)

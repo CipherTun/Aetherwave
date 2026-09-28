@@ -25,7 +25,6 @@ android {
         // Free, instant sign-up at https://developer.jamendo.com — no cost, no approval wait.
         // This is the only credential the app needs — Internet Archive and Apple's
         // podcast endpoints (search/lookup/charts + RSS) are all keyless.
-        buildConfigField("String", "BACKEND_URL", "\"${project.findProperty("BACKEND_URL") ?: "http://127.0.0.1:17843"}\"")
         buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${project.findProperty("JAMENDO_CLIENT_ID") ?: "REPLACE_ME"}\"")
     }
 

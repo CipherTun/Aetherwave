@@ -29,7 +29,7 @@ object NetworkModule {
 
     val jamendoApi: JamendoApi by lazy {
         Retrofit.Builder()
-            .baseUrl("http://127.0.0.1:17843/api/jamendo/")
+            .baseUrl("https://api.jamendo.com/")
             .client(baseClient())
             .addConverterFactory(jsonConverter)
             .build()

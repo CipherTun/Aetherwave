@@ -33,25 +33,8 @@ data class LibraryEntry(
 
 /** Everything persisted to disk between launches — one small JSON blob. */
 @Serializable
-data class Playlist(
-    val id: String,
-    val name: String,
-    val description: String = "",
-    val tracks: List<Track> = emptyList(),
-    val createdAtMillis: Long = System.currentTimeMillis()
-)
-
-/** Everything persisted to disk between launches — one small JSON blob. */
-@Serializable
 data class LibrarySnapshot(
     val entries: List<LibraryEntry> = emptyList(),
     val favoriteIds: Set<String> = emptySet(),
-    val favoriteTracks: List<Track> = emptyList(),
-    val followedArtists: Set<String> = emptySet(),
-    val recentlyPlayed: List<Track> = emptyList(),
-    val searchHistory: List<String> = emptyList(),
-    val importedTracks: List<Track> = emptyList(),
-    val playlists: List<Playlist> = emptyList(),
-    val downloadOverWifiOnly: Boolean = false,
-    val smartDownloads: Boolean = false
+    val downloadOverWifiOnly: Boolean = false
 )
