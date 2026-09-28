@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.ciphertun.aetherwave.model.Track
+import com.ciphertun.aetherwave.data.LibraryStore
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +120,57 @@ object PlayerManager {
         if (track == null) return
         val current = _recentlyPlayed.value.filterNot { it.id == track.id }
         _recentlyPlayed.value = (listOf(track) + current).take(15)
+        LibraryStore.recordRecentlyPlayed(track)
+    }
+
+    /** Adds a track to the end of the current queue without interrupting playback. */
+    fun addToQueue(track: Track) {
+        val current = _queue.value
+        if (current.any { it.id == track.id }) return
+        _queue.value = current + track
+        controller?.addMediaItem(
+            MediaItem.Builder()
+                .setUri(track.streamUrl)
+                .setMediaId(track.id)
+                .build()
+        )
+    }
+
+    /** Places a track immediately after the current item. */
+    fun playNext(track: Track) {
+        if (controller == null) {
+            play(track)
+            return
+        }
+        val currentIndex = controller?.currentMediaItemIndex ?: -1
+        val insertAt = (currentIndex + 1).coerceAtLeast(0)
+        if (_queue.value.any { it.id == track.id }) return
+        val nextQueue = _queue.value.toMutableList().apply {
+            add(insertAt.coerceAtMost(size), track)
+        }
+        _queue.value = nextQueue
+        controller?.addMediaItem(insertAt, MediaItem.Builder().setUri(track.streamUrl).setMediaId(track.id).build())
+    }
+
+    /** Jump directly to a queue item. */
+    fun playQueueIndex(index: Int) {
+        val c = controller ?: return
+        if (index !in _queue.value.indices) return
+        c.seekTo(index, 0L)
+        c.play()
+    }
+
+    /** Removes a queued item without disturbing the rest of playback. */
+    fun removeFromQueue(index: Int) {
+        if (index !in _queue.value.indices) return
+        _queue.value = _queue.value.toMutableList().also { it.removeAt(index) }
+        controller?.removeMediaItem(index)
+        if (_queue.value.isEmpty()) {
+            _currentIndex.value = -1
+            _nowPlaying.value = null
+        } else if (index < _currentIndex.value) {
+            _currentIndex.value = _currentIndex.value - 1
+        }
     }
 
     /** Convenience for "play just this one" (e.g. a single library/offline item). */

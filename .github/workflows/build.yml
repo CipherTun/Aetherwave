@@ -1,15 +1,93 @@
-name: Build APK
+name: Build Aetherwave — Backend Then Android
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev", "devn" ]
+  pull_request:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  backend:
+    name: Build Go backend first
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Test backend
+        working-directory: backend
+        run: go test ./...
+
+      - name: Build Android backend ABIs
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          CGO_ENABLED=0 GOOS=android GOARCH=arm GOARM=7 \
+            go build -trimpath -ldflags='-s -w' \
+            -o dist/armeabi-v7a/aetherwave-server ./cmd/server
+
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+            go build -trimpath -ldflags='-s -w' \
+            -o dist/arm64-v8a/aetherwave-server ./cmd/server
+
+          CGO_ENABLED=0 GOOS=android GOARCH=386 \
+            go build -trimpath -ldflags='-s -w' \
+            -o dist/x86/aetherwave-server ./cmd/server
+
+          CGO_ENABLED=0 GOOS=android GOARCH=amd64 \
+            go build -trimpath -ldflags='-s -w' \
+            -o dist/x86_64/aetherwave-server ./cmd/server
+
+          sha256sum dist/*/aetherwave-server > dist/SHA256SUMS
+
+      - name: Package backend
+        working-directory: backend
+        run: |
+          tar -czf aetherwave-backend.tar.gz -C dist \
+            armeabi-v7a arm64-v8a x86 x86_64 SHA256SUMS
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherwave-backend
+          path: backend/aetherwave-backend.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: Build Android with embedded backend
+    needs: backend
+    if: needs.backend.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aetherwave-backend
+          path: .ci/backend
+
+      - name: Integrate backend binaries into APK assets
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/backend/extracted
+          tar -xzf .ci/backend/aetherwave-backend.tar.gz -C .ci/backend/extracted
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            test -f ".ci/backend/extracted/$abi/aetherwave-server"
+            mkdir -p "app/src/main/assets/backend/$abi"
+            cp ".ci/backend/extracted/$abi/aetherwave-server" \
+              "app/src/main/assets/backend/$abi/aetherwave-server"
+          done
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -17,9 +95,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # No gradlew wrapper jar is checked into this repo (it's a binary this
-      # assistant can't fetch offline). This action installs a pinned Gradle
-      # directly instead — same result, one less binary to trust blindly.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -36,3 +111,26 @@ jobs:
         with:
           name: aetherwave-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  package:
+    name: Package complete build
+    needs: [backend, android]
+    if: needs.backend.result == 'success' && needs.android.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aetherwave-debug-apk
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: aetherwave-backend
+          path: release
+
+      - name: Upload complete package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherwave-complete
+          path: release

@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -33,6 +34,7 @@ import com.ciphertun.aetherwave.model.DownloadStatus
 import com.ciphertun.aetherwave.model.FEATURED_COUNTRIES
 import com.ciphertun.aetherwave.model.FEATURED_MUSIC_COUNTRIES
 import com.ciphertun.aetherwave.model.PodcastEpisode
+import com.ciphertun.aetherwave.model.Playlist
 import com.ciphertun.aetherwave.model.PodcastShow
 import com.ciphertun.aetherwave.model.Track
 import com.ciphertun.aetherwave.playback.PlayerManager
@@ -43,12 +45,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 
-private enum class Tab { HOME, EXPLORE, DOWNLOADS, LIBRARY }
+private enum class Tab { MUSIC, DISCOVER, PODCASTS, LIBRARY }
 
 @Composable
-fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
-    var tab by remember { mutableStateOf(Tab.HOME) }
+fun HomeScreen(
+    viewModel: SearchViewModel = viewModel(),
+    onImportAudio: () -> Unit = {}
+) {
+    var tab by remember { mutableStateOf(Tab.MUSIC) }
     var playerExpanded by remember { mutableStateOf(false) }
+    var queueSheetOpen by remember { mutableStateOf(false) }
+    var settingsSheetOpen by remember { mutableStateOf(false) }
+    var lyricsSheetOpen by remember { mutableStateOf(false) }
+    var lyricsText by remember { mutableStateOf<String?>(null) }
+    var lyricsLoading by remember { mutableStateOf(false) }
+    val repository = remember { com.ciphertun.aetherwave.data.MusicRepository() }
     val musicState by viewModel.music.collectAsState()
     val podcastState by viewModel.podcasts.collectAsState()
     val nowPlaying by PlayerManager.nowPlaying.collectAsState()
@@ -61,24 +72,11 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
     val sleepTimerEndsAt by PlayerManager.sleepTimerEndsAtMillis.collectAsState()
     val librarySnapshot by LibraryStore.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
-    val appContext = LocalContext.current
-    val smartDownloader = remember { Downloader(appContext) }
-    val recentlyPlayed by PlayerManager.recentlyPlayed.collectAsState()
 
     // Polls DownloadManager for real progress/completion regardless of which
     // tab is showing, so a download finished in the background (or while the
     // user was on a different tab) still shows up promptly everywhere —
     // the "already downloaded" badge on search rows included.
-    LaunchedEffect(librarySnapshot.smartDownloadsEnabled, recentlyPlayed) {
-        if (librarySnapshot.smartDownloadsEnabled && recentlyPlayed.isNotEmpty()) {
-            recentlyPlayed.take(librarySnapshot.smartDownloadLimit.coerceIn(1, 50)).forEach { track ->
-                if (!track.isDownloadable) return@forEach
-                val exists = LibraryStore.snapshot.value.entries.any { it.id == track.id && (it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.COMPLETE) }
-                if (!exists) smartDownloader.downloadTrack(track)
-            }
-        }
-    }
-
     LaunchedEffect(librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
         while (librarySnapshot.entries.any { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }) {
             delay(1200)
@@ -94,27 +92,28 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
                         MiniPlayerBar(
                             track = nowPlaying!!,
                             isPlaying = isPlaying,
-                            onExpand = { playerExpanded = true }
+                            onExpand = { playerExpanded = true },
+                            onQueue = { queueSheetOpen = true }
                         )
                     }
                     NavigationBar(containerColor = SurfaceElevated) {
                         NavigationBarItem(
-                            selected = tab == Tab.HOME,
-                            onClick = { tab = Tab.HOME },
-                            icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
-                            label = { Text("Home") }
+                            selected = tab == Tab.MUSIC,
+                            onClick = { tab = Tab.MUSIC },
+                            icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Music") },
+                            label = { Text("Music") }
                         )
                         NavigationBarItem(
-                            selected = tab == Tab.EXPLORE,
-                            onClick = { tab = Tab.EXPLORE },
-                            icon = { Icon(Icons.Filled.Explore, contentDescription = "Explore") },
-                            label = { Text("Explore") }
+                            selected = tab == Tab.DISCOVER,
+                            onClick = { tab = Tab.DISCOVER },
+                            icon = { Icon(Icons.Filled.Explore, contentDescription = "Discover") },
+                            label = { Text("Discover") }
                         )
                         NavigationBarItem(
-                            selected = tab == Tab.DOWNLOADS,
-                            onClick = { tab = Tab.DOWNLOADS },
-                            icon = { Icon(Icons.Filled.Download, contentDescription = "Downloads") },
-                            label = { Text("Downloads") }
+                            selected = tab == Tab.PODCASTS,
+                            onClick = { tab = Tab.PODCASTS },
+                            icon = { Icon(Icons.Filled.Podcasts, contentDescription = "Podcasts") },
+                            label = { Text("Podcasts") }
                         )
                         NavigationBarItem(
                             selected = tab == Tab.LIBRARY,
@@ -128,23 +127,110 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    Tab.HOME -> MusicTab(
+                    Tab.MUSIC -> MusicTab(
                         state = musicState,
                         onSearch = viewModel::searchMusic,
-                        onSetCountry = viewModel::setMusicCountry
+                        onSetCountry = viewModel::setMusicCountry,
+                        onSettings = { settingsSheetOpen = true }
                     )
-                    Tab.EXPLORE -> ExploreTab(
-                        musicState = musicState,
-                        podcastState = podcastState,
-                        onMusicSearch = viewModel::searchMusic,
-                        onMusicCountry = viewModel::setMusicCountry,
-                        onPodcastSearch = viewModel::searchPodcasts,
-                        onOpenPodcast = viewModel::openPodcast,
-                        onClosePodcast = viewModel::closePodcast,
-                        onPodcastCountry = viewModel::setCountry
+                    Tab.DISCOVER -> DiscoverTab(
+                        state = musicState,
+                        onSearch = viewModel::searchMusic
                     )
-                    Tab.DOWNLOADS -> DownloadsTab()
-                    Tab.LIBRARY -> LibraryTab()
+                    Tab.PODCASTS -> PodcastTab(
+                        state = podcastState,
+                        onSearch = viewModel::searchPodcasts,
+                        onOpenShow = viewModel::openPodcast,
+                        onBack = viewModel::closePodcast,
+                        onSetCountry = viewModel::setCountry
+                    )
+                    Tab.LIBRARY -> LibraryTab(onImportAudio = onImportAudio)
+                }
+            }
+        }
+
+        if (queueSheetOpen) {
+            ModalBottomSheet(onDismissRequest = { queueSheetOpen = false }) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                    Text(
+                        "Up next",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                    if (queue.isEmpty()) {
+                        Text("Your queue is empty", modifier = Modifier.padding(20.dp))
+                    } else {
+                        LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                            itemsIndexed(queue, key = { _, t -> t.id }) { index, track ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { PlayerManager.playQueueIndex(index) }.padding(horizontal = 16.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(
+                                        model = track.artworkUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(SurfaceElevated)
+                                    )
+                                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                        Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                                        Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (index == currentIndex) {
+                                        Icon(Icons.Filled.Equalizer, "Playing", tint = NeonCyan)
+                                    }
+                                    IconButton(onClick = { PlayerManager.removeFromQueue(index) }) {
+                                        Icon(Icons.Filled.Close, "Remove from queue")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (settingsSheetOpen) {
+            ModalBottomSheet(onDismissRequest = { settingsSheetOpen = false }) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("Aetherwave", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Music, podcasts and offline listening", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(18.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.CloudDone, null, tint = NeonCyan)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Local music service")
+                            Text("Connected on 127.0.0.1:17843", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedButton(onClick = { settingsSheetOpen = false; onImportAudio() }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.FileOpen, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Import music from this device")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("Version 0.3.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        }
+
+        if (lyricsSheetOpen && nowPlaying != null) {
+            ModalBottomSheet(onDismissRequest = { lyricsSheetOpen = false }) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("Lyrics", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("${nowPlaying!!.title} · ${nowPlaying!!.artist}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(16.dp))
+                    when {
+                        lyricsLoading -> CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally), color = NeonCyan)
+                        lyricsText.isNullOrBlank() -> Text("Lyrics aren't available for this track.")
+                        else -> LazyColumn(Modifier.heightIn(max = 520.dp)) {
+                            item { Text(lyricsText!!, style = MaterialTheme.typography.bodyLarge) }
+                        }
+                    }
+                    Spacer(Modifier.height(20.dp))
                 }
             }
         }
@@ -170,7 +256,7 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
                     repeatMode = repeatMode,
                     playbackSpeed = playbackSpeed,
                     sleepTimerEndsAtMillis = sleepTimerEndsAt,
-                    onToggleFavorite = { scope.launch { LibraryStore.toggleFavorite(track.id) } },
+                    onToggleFavorite = { scope.launch { LibraryStore.toggleFavorite(track) } },
                     onDownload = { scope.launch { downloader.downloadTrack(track) } },
                     onCollapse = { playerExpanded = false },
                     onSkipNext = { PlayerManager.skipNext() },
@@ -179,7 +265,24 @@ fun HomeScreen(viewModel: SearchViewModel = viewModel()) {
                     onCycleRepeat = { PlayerManager.cycleRepeatMode() },
                     onSetSpeed = { PlayerManager.setPlaybackSpeed(it) },
                     onScheduleSleepTimer = { PlayerManager.scheduleSleepTimer(it) },
-                    onCancelSleepTimer = { PlayerManager.cancelSleepTimer() }
+                    onCancelSleepTimer = { PlayerManager.cancelSleepTimer() },
+                    onOpenLyrics = {
+                        lyricsSheetOpen = true
+                        lyricsLoading = true
+                        lyricsText = null
+                        scope.launch {
+                            lyricsText = repository.lyricsFor(track)
+                            lyricsLoading = false
+                        }
+                    },
+                    onShare = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "${track.title} — ${track.artist}\n${track.streamUrl}")
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share track"))
+                    },
+                    onOpenQueue = { queueSheetOpen = true }
                 )
             }
         }
@@ -193,69 +296,54 @@ private fun greeting(): String = when (LocalTime.now().hour) {
 }
 
 @Composable
-private fun ExploreTab(
-    musicState: MusicUiState,
-    podcastState: PodcastUiState,
-    onMusicSearch: (String) -> Unit,
-    onMusicCountry: (String) -> Unit,
-    onPodcastSearch: (String) -> Unit,
-    onOpenPodcast: (PodcastShow) -> Unit,
-    onClosePodcast: () -> Unit,
-    onPodcastCountry: (String) -> Unit
+private fun MusicTab(
+    state: MusicUiState,
+    onSearch: (String) -> Unit,
+    onSetCountry: (String) -> Unit,
+    onSettings: () -> Unit
 ) {
-    var mode by rememberSaveable { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize()) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            SegmentedButton(selected = mode == 0, onClick = { mode = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Music") }
-            SegmentedButton(selected = mode == 1, onClick = { mode = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Podcasts") }
-        }
-        if (mode == 0) MusicTab(musicState, onMusicSearch, onMusicCountry)
-        else PodcastTab(podcastState, onPodcastSearch, onOpenPodcast, onClosePodcast, onPodcastCountry)
-    }
-}
-
-@Composable
-private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCountry: (String) -> Unit) {
     val context = LocalContext.current
     val downloader = remember { Downloader(context) }
     val scope = rememberCoroutineScope()
-    val recentlyPlayed by PlayerManager.recentlyPlayed.collectAsState()
+    val recentlyPlayedSession by PlayerManager.recentlyPlayed.collectAsState()
+    val librarySnapshot by LibraryStore.snapshot.collectAsState()
+    val recentlyPlayed = (recentlyPlayedSession + librarySnapshot.recentlyPlayed).distinctBy { it.id }.take(15)
     val isBrowsingHome = state.query.isBlank()
-    var sourceFilter by rememberSaveable { mutableStateOf("ALL") }
-    val filteredTracks = remember(state.tracks, sourceFilter) {
-        if (sourceFilter == "ALL") state.tracks else state.tracks.filter { it.source.name == sourceFilter }
-    }
 
     Column(Modifier.fillMaxSize()) {
+        MusicHeader(onSettings = onSettings)
         SearchField(
             value = state.query,
-            placeholder = "Search Jamendo + Internet Archive + Openverse…",
+            placeholder = "Search songs, artists, albums…",
             onSearch = onSearch
         )
+        if (state.query.isBlank()) {
+            val snapshot by LibraryStore.snapshot.collectAsState()
+            if (snapshot.searchHistory.isNotEmpty()) {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(snapshot.searchHistory, key = { it }) { query ->
+                        AssistChip(onClick = { onSearch(query) }, label = { Text(query, maxLines = 1) }, leadingIcon = { Icon(Icons.Filled.History, null, modifier = Modifier.size(16.dp)) })
+                    }
+                }
+            }
+        }
+        DiscoveryChips(onSearch = onSearch)
+        MoodChips(onSearch = onSearch)
+        SearchHistoryRow(onSearch = onSearch)
         when {
             state.loadState == LoadState.LOADING && isBrowsingHome && state.trending.isEmpty() -> ShimmerList()
             !isBrowsingHome && state.loadState == LoadState.LOADING -> ShimmerList()
             !isBrowsingHome && state.tracks.isEmpty() -> EmptyState("No tracks found — try another search")
-            !isBrowsingHome -> {
-                Column {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(listOf("ALL" to "All", "JAMENDO" to "Jamendo", "ARCHIVE_ORG" to "Archive", "OPENVERSE" to "Openverse"), key = { it.first }) { (code, label) ->
-                            FilterChip(selected = sourceFilter == code, onClick = { sourceFilter = code }, label = { Text(label) })
-                        }
-                    }
-                    if (filteredTracks.isEmpty()) EmptyState("No results for this source") else LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                        itemsIndexed(filteredTracks, key = { _, t -> t.id }) { index, track ->
+            !isBrowsingHome -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+                itemsIndexed(state.tracks, key = { _, t -> t.id }) { index, track ->
                     TrackRow(
                         track = track,
-                        onPlay = { PlayerManager.playQueue(filteredTracks, index) },
+                        onPlay = { PlayerManager.playQueue(state.tracks, index) },
                         onDownload = if (track.isDownloadable) {
                             { scope.launch { downloader.downloadTrack(track) } }
-                        } else null
-                        }
-                    }
+                        } else null,
+                        radioTracks = state.tracks
+                    )
                 }
             }
             else -> {
@@ -271,11 +359,29 @@ private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCount
                             )
                         }
                     }
+                    val discoveryPool = (recentlyPlayed + state.trending + state.newReleases + state.countryTracks).distinctBy { it.id }
+                    if (discoveryPool.isNotEmpty()) {
+                        item {
+                            FeaturedMixCard(
+                                tracks = discoveryPool,
+                                onPlay = { PlayerManager.playQueue(discoveryPool.shuffled(), 0) }
+                            )
+                        }
+                        item { MusicRail(title = "Quick Mix", tracks = discoveryPool.shuffled().take(12)) }
+                    }
                     if (recentlyPlayed.isNotEmpty()) {
                         item { MusicRail(title = "Recently played", tracks = recentlyPlayed) }
                     }
                     if (state.newReleases.isNotEmpty()) {
                         item { MusicRail(title = "New releases on Jamendo", tracks = state.newReleases) }
+                    }
+                    val sourceTracks = state.trending.groupBy { it.source }.values.flatten().distinctBy { it.id }
+                    if (sourceTracks.isNotEmpty()) {
+                        item { MusicRail(title = "Open & independent", tracks = sourceTracks) }
+                    }
+                    val artistPicks = discoveryPool.groupBy { it.artist }.values.mapNotNull { it.firstOrNull() }.take(12)
+                    if (artistPicks.isNotEmpty()) {
+                        item { ArtistRail(title = "Artists to explore", tracks = artistPicks, onSearch = onSearch) }
                     }
                     item {
                         Text(
@@ -304,6 +410,135 @@ private fun MusicTab(state: MusicUiState, onSearch: (String) -> Unit, onSetCount
                         item { MusicRail(title = "Popular this month", tracks = state.trending) }
                     }
                     item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun MusicHeader(onSettings: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "AETHERWAVE",
+                style = MaterialTheme.typography.labelLarge,
+                color = NeonCyan,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                greeting(),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Surface(
+            shape = CircleShape,
+            color = NeonPurple.copy(alpha = 0.18f)
+        ) {
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = NeonCyan)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoveryChips(onSearch: (String) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(listOf("Trending" to "trending", "New music" to "new releases", "Hip-hop" to "hip hop", "Afrobeats" to "afrobeats", "Electronic" to "electronic")) { (label, query) ->
+            Surface(
+                onClick = { onSearch(query) },
+                shape = RoundedCornerShape(50),
+                color = SurfaceElevated
+            ) {
+                Text(
+                    label,
+                    color = if (label == "Trending") NeonCyan else MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+}
+
+@Composable
+private fun MoodChips(onSearch: (String) -> Unit) {
+    val moods = listOf("Chill", "Focus", "Workout", "Late night", "Happy", "Melancholy")
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(moods) { mood ->
+            AssistChip(onClick = { onSearch(mood) }, label = { Text(mood) }, leadingIcon = { Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(16.dp)) })
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+@Composable
+private fun SearchHistoryRow(onSearch: (String) -> Unit) {
+    val snapshot by LibraryStore.snapshot.collectAsState()
+    val scope = rememberCoroutineScope()
+    if (snapshot.searchHistory.isEmpty()) return
+    Column {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Recent searches", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { scope.launch { LibraryStore.clearSearchHistory() } }) { Text("Clear") }
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(snapshot.searchHistory, key = { it }) { q ->
+                AssistChip(onClick = { onSearch(q) }, label = { Text(q, maxLines = 1, overflow = TextOverflow.Ellipsis) }, leadingIcon = { Icon(Icons.Filled.History, null, modifier = Modifier.size(16.dp)) })
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun ArtistRail(title: String, tracks: List<Track>, onSearch: (String) -> Unit) {
+    Column(Modifier.padding(top = 4.dp, bottom = 4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(tracks, key = { it.artist }) { track ->
+                Column(Modifier.width(110.dp).clickable { onSearch(track.artist) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    AsyncImage(model = track.artworkUrl, contentDescription = null, modifier = Modifier.size(96.dp).clip(CircleShape).background(SurfaceElevated))
+                    Spacer(Modifier.height(6.dp))
+                    Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                    Text("Explore", style = MaterialTheme.typography.labelSmall, color = NeonCyan)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedMixCard(tracks: List<Track>, onPlay: () -> Unit) {
+    Card(Modifier.padding(16.dp).fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceElevated)) {
+        Box(Modifier.height(190.dp).fillMaxWidth()) {
+            Row(Modifier.fillMaxSize().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                val covers = tracks.take(3)
+                if (covers.isNotEmpty()) {
+                    AsyncImage(model = covers.first().artworkUrl, contentDescription = null, modifier = Modifier.size(132.dp).clip(RoundedCornerShape(20.dp)).background(SurfaceElevated))
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Your Quick Mix", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                    Text("A rotating mix built from what's trending, new and recently played.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onPlay) {
+                        Icon(Icons.Filled.PlayArrow, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Play mix")
+                    }
                 }
             }
         }
@@ -343,6 +578,148 @@ private fun HeroTrackCard(track: Track, onClick: () -> Unit) {
         Text(track.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
+}
+
+@Composable
+private fun DiscoverTab(
+    state: MusicUiState,
+    onSearch: (String) -> Unit
+) {
+    val pools = listOf(state.trending, state.newReleases, state.countryTracks).flatten().distinctBy { it.id }
+    val samples = if (pools.isNotEmpty()) pools else state.tracks
+    var sampleIndex by remember(samples.map { it.id }) { mutableIntStateOf(0) }
+    val sample = samples.getOrNull(sampleIndex.coerceIn(0, (samples.size - 1).coerceAtLeast(0)))
+    val genres = listOf(
+        "Afrobeats", "Hip-hop", "Electronic", "R&B", "Jazz", "Rock", "Chill", "Instrumental", "Focus", "Workout"
+    )
+    LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+        item {
+            Column(Modifier.padding(16.dp)) {
+                Text("Discover", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Find something new without leaving your flow.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item {
+            Text("Quick discovery", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(genres) { genre ->
+                    FilterChip(selected = false, onClick = { onSearch(genre) }, label = { Text(genre) })
+                }
+            }
+        }
+        if (sample != null) {
+            item {
+                Card(Modifier.padding(16.dp).fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceElevated)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Samples", style = MaterialTheme.typography.labelLarge, color = NeonCyan, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        AsyncImage(model = sample.artworkUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1.55f).clip(RoundedCornerShape(18.dp)).background(SurfaceElevated))
+                        Spacer(Modifier.height(12.dp))
+                        Text(sample.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(sample.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { PlayerManager.play(sample) }) { Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(5.dp)); Text("Play") }
+                            OutlinedButton(onClick = { sampleIndex = (sampleIndex + 1) % samples.size }) { Icon(Icons.Filled.SkipNext, null); Spacer(Modifier.width(5.dp)); Text("Next") }
+                        }
+                    }
+                }
+            }
+        }
+        if (samples.isNotEmpty()) {
+            item {
+                Text("Fresh picks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+            }
+            itemsIndexed(samples.take(12), key = { _, t -> t.id }) { index, track ->
+                TrackRow(track = track, onPlay = { PlayerManager.playQueue(samples, index) }, onDownload = null, radioTracks = samples)
+            }
+        } else {
+            item { EmptyState("Start with a genre or search for an artist, song or mood.") }
+        }
+    }
+}
+
+@Composable
+private fun DiscoveryFeatureCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Card(
+        Modifier.padding(16.dp).fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceElevated)
+    ) {
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = CircleShape, color = NeonCyan.copy(alpha = 0.14f)) {
+                Icon(icon, null, tint = NeonCyan, modifier = Modifier.padding(12.dp).size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackDetailsDialog(track: Track, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        title = { Text("Track details") },
+        text = {
+            Column {
+                AsyncImage(model = track.artworkUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp)).background(SurfaceElevated))
+                Spacer(Modifier.height(14.dp))
+                Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                Text("Source: ${track.source}")
+                Text("Duration: ${track.durationSeconds?.let { "%d:%02d".format(it / 60, it % 60) } ?: "Unknown"}")
+                Text("License: ${track.licenseNote}")
+                Spacer(Modifier.height(6.dp))
+                Text("Source: ${track.source.name}", style = MaterialTheme.typography.labelMedium)
+                Text("Stream: ${track.streamUrl}", style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                track.downloadUrl?.let { Text("Download: $it", style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun PlaylistPickerDialog(
+    track: Track,
+    playlists: List<Playlist>,
+    onCreate: (String) -> Unit,
+    onAdd: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var createMode by remember { mutableStateOf(playlists.isEmpty()) }
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to playlist") },
+        confirmButton = {
+            if (createMode) {
+                TextButton(onClick = { if (name.isNotBlank()) { onCreate(name); onDismiss() } }) { Text("Create") }
+            } else TextButton(onClick = onDismiss) { Text("Done") }
+        },
+        dismissButton = { if (createMode.not()) TextButton(onClick = { createMode = true }) { Text("New playlist") } },
+        text = {
+            Column {
+                if (createMode) {
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true)
+                } else {
+                    playlists.forEach { playlist ->
+                        ListItem(
+                            headlineContent = { Text(playlist.name) },
+                            supportingContent = { Text("${playlist.tracks.size} tracks") },
+                            leadingContent = { Icon(Icons.Filled.QueueMusic, null) },
+                            modifier = Modifier.clickable { onAdd(playlist.id); onDismiss() }
+                        )
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -450,9 +827,15 @@ private fun SearchField(value: String, placeholder: String, onSearch: (String) -
 }
 
 @Composable
-private fun TrackRow(track: Track, onPlay: () -> Unit, onDownload: (() -> Unit)?) {
+private fun TrackRow(track: Track, onPlay: () -> Unit, onDownload: (() -> Unit)?, radioTracks: List<Track> = emptyList()) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val librarySnapshot by LibraryStore.snapshot.collectAsState()
     val alreadyDownloaded = librarySnapshot.entries.any { it.id == track.id && it.status == DownloadStatus.COMPLETE }
+    val favorite = track.id in librarySnapshot.favoriteIds
+    var menuOpen by remember { mutableStateOf(false) }
+    var detailsOpen by remember { mutableStateOf(false) }
+    var playlistOpen by remember { mutableStateOf(false) }
 
     Row(
         Modifier
@@ -464,7 +847,7 @@ private fun TrackRow(track: Track, onPlay: () -> Unit, onDownload: (() -> Unit)?
         AsyncImage(
             model = track.artworkUrl,
             contentDescription = null,
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(SurfaceElevated)
+            modifier = Modifier.size(58.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceElevated)
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -479,6 +862,91 @@ private fun TrackRow(track: Track, onPlay: () -> Unit, onDownload: (() -> Unit)?
                 Icon(Icons.Filled.Download, contentDescription = "Download", tint = NeonCyan)
             }
         }
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "More actions")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    leadingIcon = { Icon(Icons.Filled.PlaylistPlay, null) },
+                    onClick = { PlayerManager.playNext(track); menuOpen = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    leadingIcon = { Icon(Icons.Filled.QueueMusic, null) },
+                    onClick = { PlayerManager.addToQueue(track); menuOpen = false }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (favorite) "Remove favorite" else "Add to favorites") },
+                    leadingIcon = { Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null) },
+                    onClick = {
+                        scope.launch {
+                            val adding = track.id !in librarySnapshot.favoriteIds
+                            LibraryStore.toggleFavorite(track)
+                            if (adding && librarySnapshot.smartDownloads && track.isDownloadable) downloader.downloadTrack(track)
+                        }
+                        menuOpen = false
+                    }
+                )
+                if (onDownload != null && !alreadyDownloaded) {
+                    DropdownMenuItem(
+                        text = { Text("Download") },
+                        leadingIcon = { Icon(Icons.Filled.Download, null) },
+                        onClick = { onDownload(); menuOpen = false }
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Add to playlist") },
+                    leadingIcon = { Icon(Icons.Filled.PlaylistAdd, null) },
+                    onClick = { playlistOpen = true; menuOpen = false }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (track.artist in librarySnapshot.followedArtists) "Unfollow artist" else "Follow artist") },
+                    leadingIcon = { Icon(Icons.Filled.PersonAdd, null) },
+                    onClick = { scope.launch { LibraryStore.toggleFollowArtist(track.artist) }; menuOpen = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Start track radio") },
+                    leadingIcon = { Icon(Icons.Filled.Radio, null) },
+                    onClick = {
+                        val pool = radioTracks.distinctBy { it.id }
+                        val radio = pool.filter { it.artist.equals(track.artist, ignoreCase = true) }.ifEmpty { pool }
+                        PlayerManager.playQueue(if (radio.isEmpty()) listOf(track) else radio.shuffled(), 0)
+                        menuOpen = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Share") },
+                    leadingIcon = { Icon(Icons.Filled.Share, null) },
+                    onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "${track.title} — ${track.artist}\n${track.streamUrl}")
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share track"))
+                        menuOpen = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Track details") },
+                    leadingIcon = { Icon(Icons.Filled.Info, null) },
+                    onClick = { detailsOpen = true; menuOpen = false }
+                )
+            }
+        }
+    }
+    if (detailsOpen) {
+        TrackDetailsDialog(track = track, onDismiss = { detailsOpen = false })
+    }
+    if (playlistOpen) {
+        PlaylistPickerDialog(
+            track = track,
+            playlists = librarySnapshot.playlists,
+            onCreate = { name -> scope.launch { LibraryStore.createPlaylist(name) } },
+            onAdd = { playlistId -> scope.launch { LibraryStore.addToPlaylist(playlistId, track) } },
+            onDismiss = { playlistOpen = false }
+        )
     }
 }
 
@@ -530,8 +998,7 @@ private fun SourceBadge(source: Track.Source) {
         Track.Source.ARCHIVE_ORG -> "Internet Archive"
         Track.Source.OPENVERSE -> "Openverse"
         Track.Source.PODCAST -> "Podcast"
-        Track.Source.LOCAL -> "On device"
-        Track.Source.DIRECT -> "Direct download"
+        Track.Source.LOCAL_IMPORT -> "This device"
     }
     Text(
         label,
@@ -545,7 +1012,7 @@ private fun SourceBadge(source: Track.Source) {
 }
 
 @Composable
-private fun MiniPlayerBar(track: Track, isPlaying: Boolean, onExpand: () -> Unit) {
+private fun MiniPlayerBar(track: Track, isPlaying: Boolean, onExpand: () -> Unit, onQueue: () -> Unit) {
     var position by remember(track.id) { mutableFloatStateOf(0f) }
     var duration by remember(track.id) { mutableFloatStateOf(0f) }
 
@@ -578,6 +1045,9 @@ private fun MiniPlayerBar(track: Track, isPlaying: Boolean, onExpand: () -> Unit
                 Text(track.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             EqualizerBars(playing = isPlaying, modifier = Modifier.padding(end = 10.dp))
+            IconButton(onClick = onQueue) {
+                Icon(Icons.Filled.QueueMusic, contentDescription = "Queue", tint = NeonCyan)
+            }
             IconButton(
                 onClick = { PlayerManager.togglePlayPause() },
                 modifier = Modifier.clip(CircleShape).background(NeonCyan)

@@ -11,8 +11,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- Lets ExoPlayer hold a wake lock while actively playing, so streaming
          audio isn't interrupted by CPU/Wi-Fi sleep once the screen turns off
          — standard for any real music/podcast player (see PlaybackService). -->

@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
  * from (Jamendo, Internet Archive, Openverse, or a podcast feed) so the rest
  * of the app never has to think about each source's own response shape.
  */
+@Serializable
 data class Track(
     val id: String,
     val title: String,
@@ -21,7 +22,7 @@ data class Track(
     val licenseNote: String
 ) {
     @Serializable
-    enum class Source { JAMENDO, ARCHIVE_ORG, OPENVERSE, PODCAST, LOCAL, DIRECT }
+    enum class Source { JAMENDO, ARCHIVE_ORG, OPENVERSE, PODCAST, LOCAL_IMPORT }
 
     val isDownloadable: Boolean get() = downloadUrl != null
 }

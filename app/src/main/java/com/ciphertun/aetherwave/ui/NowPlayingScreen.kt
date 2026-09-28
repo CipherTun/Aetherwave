@@ -13,6 +13,10 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -79,7 +83,10 @@ fun NowPlayingScreen(
     onCycleRepeat: () -> Unit,
     onSetSpeed: (Float) -> Unit,
     onScheduleSleepTimer: (Int) -> Unit,
-    onCancelSleepTimer: () -> Unit
+    onCancelSleepTimer: () -> Unit,
+    onOpenLyrics: () -> Unit,
+    onShare: () -> Unit,
+    onOpenQueue: () -> Unit
 ) {
     var positionMs by remember(track.id) { mutableFloatStateOf(0f) }
     var durationMs by remember(track.id) { mutableFloatStateOf(0f) }
@@ -124,7 +131,15 @@ fun NowPlayingScreen(
                 Spacer(Modifier.weight(1f))
                 Text("NOW PLAYING", style = MaterialTheme.typography.labelSmall)
                 Spacer(Modifier.weight(1f))
-                Spacer(Modifier.size(48.dp)) // balances the collapse button
+                IconButton(onClick = onOpenLyrics) {
+                    Icon(Icons.Filled.TextSnippet, contentDescription = "Lyrics")
+                }
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Filled.Share, contentDescription = "Share")
+                }
+                IconButton(onClick = onOpenQueue) {
+                    Icon(Icons.Filled.QueueMusic, contentDescription = "Queue")
+                }
             }
 
             Spacer(Modifier.weight(1f))
@@ -300,6 +315,28 @@ fun NowPlayingScreen(
                 }
             }
 
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                    color = com.ciphertun.aetherwave.ui.theme.SurfaceElevated
+                ) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.HighQuality, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            when (track.source) {
+                                Track.Source.JAMENDO -> "Stream · best available source · download quality depends on the release"
+                                Track.Source.ARCHIVE_ORG -> "Stream · best available source"
+                                Track.Source.OPENVERSE -> "Stream · source quality"
+                                Track.Source.PODCAST -> "Stream · podcast feed quality"
+                                Track.Source.LOCAL_IMPORT -> "Local file · stored on this device"
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Text(
                 track.licenseNote,

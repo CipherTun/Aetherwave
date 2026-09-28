@@ -1,5 +1,8 @@
 package com.ciphertun.aetherwave.ui
 
+import com.ciphertun.aetherwave.backend.EmbeddedBackend
+import com.ciphertun.aetherwave.data.LibraryStore
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ciphertun.aetherwave.data.MusicRepository
@@ -47,8 +50,11 @@ class SearchViewModel(
     val podcasts: StateFlow<PodcastUiState> = _podcasts.asStateFlow()
 
     init {
-        loadMusicHome()
-        loadTrendingPodcasts()
+        viewModelScope.launch {
+            EmbeddedBackend.awaitReady()
+            loadMusicHome()
+            loadTrendingPodcasts()
+        }
     }
 
     /** Loads the three home rails (New Releases, Popular, Artists from <country>) in parallel. */
@@ -70,6 +76,7 @@ class SearchViewModel(
     }
 
     fun searchMusic(query: String) {
+        if (query.isNotBlank()) viewModelScope.launch { com.ciphertun.aetherwave.data.LibraryStore.rememberSearch(query) }
         _music.value = _music.value.copy(query = query)
         if (query.isBlank()) {
             // Blank query = back to the sectioned home view; those rails are
