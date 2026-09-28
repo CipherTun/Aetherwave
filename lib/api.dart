@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 
 const jamendoId = String.fromEnvironment('JAMENDO_CLIENT_ID');
 const audiusKey = String.fromEnvironment('AUDIUS_API_KEY');
+const openverseToken = String.fromEnvironment('OPENVERSE_API_TOKEN');
 const podcastIndexKey = String.fromEnvironment('PODCASTINDEX_API_KEY');
 const podcastIndexSecret = String.fromEnvironment('PODCASTINDEX_API_SECRET');
 const appName = 'Aetherwave';
@@ -11,19 +12,23 @@ class Track {
   final String id, src, title, artist, image, url, dl;
   final bool preview;
   final String album, genre;
+  final String license, licenseUrl;
+
   final int? year, durationMs;
   Track(this.id, this.src, this.title, this.artist, this.image, this.url, this.dl, this.preview,
-      {this.album = '', this.genre = '', this.year, this.durationMs});
+      {this.album = '', this.genre = '', this.year, this.durationMs, this.license = '', this.licenseUrl = ''});
   factory Track.fromJson(Map j) => Track(
         '${j['id']}', '${j['src'] ?? ''}', '${j['title'] ?? ''}', '${j['artist'] ?? ''}',
         '${j['image'] ?? ''}', '${j['url'] ?? ''}', '${j['dl'] ?? ''}', j['preview'] == true,
         album: '${j['album'] ?? ''}', genre: '${j['genre'] ?? ''}',
         year: j['year'] == null ? null : int.tryParse('${j['year']}'),
         durationMs: j['durationMs'] == null ? null : int.tryParse('${j['durationMs']}'),
+        license: '${j['license'] ?? ''}', licenseUrl: '${j['licenseUrl'] ?? ''}',
       );
   Map<String, dynamic> toJson() => {
         'id': id, 'src': src, 'title': title, 'artist': artist, 'image': image, 'url': url,
         'dl': dl, 'preview': preview, 'album': album, 'genre': genre, 'year': year, 'durationMs': durationMs,
+        'license': license, 'licenseUrl': licenseUrl,
       };
 }
 
@@ -95,6 +100,78 @@ Future<List<Track>> deezer({String? q}) async {
   return [for (final j in d['data']) if ((j['preview'] ?? '') != '') _deezer(j)];
 }
 
+
+
+Track _openverse(Map j) {
+  final license = '${j['license'] ?? ''}'.toLowerCase();
+  final downloadable = license == 'cc0' || license == 'pdm' || license == 'publicdomain';
+  final genres = (j['genres'] as List? ?? []).map((e) => '$e').where((e) => e.isNotEmpty).join(', ');
+  return Track(
+    'ov${j['id']}', 'Openverse', j['title'] ?? '', j['creator'] ?? '',
+    j['thumbnail'] ?? '', j['url'] ?? '', downloadable ? (j['url'] ?? '') : '', false,
+    genre: genres,
+    durationMs: j['duration'] is num ? (j['duration'] as num).round() : null,
+    license: j['license'] ?? '', licenseUrl: j['license_url'] ?? '',
+  );
+}
+
+Future<List<Track>> openverseSearch(String q) async {
+  final headers = <String, String>{};
+  if (openverseToken.isNotEmpty) headers['Authorization'] = 'Bearer $openverseToken';
+  final d = await _get(Uri.https('api.openverse.org', '/v1/audio/', {
+    'q': q,
+    'page_size': '20',
+    'license': 'cc0,pdm',
+    'mature': 'false',
+  }), headers: headers);
+  return [for (final j in (d['results'] as List? ?? []))
+    if ('${j['url'] ?? ''}'.isNotEmpty) _openverse(j)];
+}
+
+Future<List<Track>> archiveSearch(String q) async {
+  final safeQ = q.replaceAll('"', ' ');
+  final d = await _get(Uri.https('archive.org', '/advancedsearch.php', {
+    'q': 'mediatype:audio AND (title:"$safeQ" OR creator:"$safeQ")',
+    'fl[]': 'identifier,title,creator,description,licenseurl,year',
+    'rows': '12',
+    'page': '1',
+    'output': 'json',
+  }));
+  final docs = ((d['response']?['docs'] as List?) ?? []);
+  final out = <Track>[];
+  for (final raw in docs) {
+    final j = Map<String, dynamic>.from(raw as Map);
+    final id = '${j['identifier'] ?? ''}';
+    if (id.isEmpty) continue;
+    final licenseUrl = '${j['licenseurl'] ?? ''}';
+    final lowLicense = licenseUrl.toLowerCase();
+    if (!(lowLicense.contains('creativecommons.org') || lowLicense.contains('publicdomain'))) continue;
+    try {
+      final meta = await _get(Uri.https('archive.org', '/metadata/$id'));
+      final files = (meta['files'] as List? ?? []);
+      Map? audio;
+      for (final f in files) {
+        final m = Map<String, dynamic>.from(f as Map);
+        final name = '${m['name'] ?? ''}'.toLowerCase();
+        final format = '${m['format'] ?? ''}'.toLowerCase();
+        if (name.endsWith('.mp3') || name.endsWith('.ogg') || name.endsWith('.flac') || format.contains('mp3') || format.contains('vorbis') || format.contains('flac')) {
+          if (!name.contains('_thumb') && !name.contains('_files.xml')) { audio = m; break; }
+        }
+      }
+      if (audio == null) continue;
+      final name = Uri.encodeComponent('${audio['name']}');
+      final url = 'https://archive.org/download/$id/$name';
+      final canDownload = lowLicense.contains('/zero/') || lowLicense.contains('publicdomain');
+      out.add(Track(
+        'ia$id', 'Internet Archive', '${j['title'] ?? id}', '${j['creator'] ?? ''}',
+        'https://archive.org/services/img/$id', url, canDownload ? url : '', false,
+        year: int.tryParse('${j['year'] ?? ''}'), license: licenseUrl, licenseUrl: licenseUrl,
+      ));
+    } catch (_) {}
+  }
+  return out;
+}
+
 enum Style { hero, cards, rank }
 class Shelf {
   final String title;
@@ -114,17 +191,44 @@ final registry = <Source>[
   Source('Audius', (q, cc) => audius(q: q), (cc, l) => [Shelf('Trending now', Style.hero, () => audius())]),
   Source('Jamendo', (q, cc) => jamendo(q: q), (cc, l) => [Shelf('Fresh indie picks', Style.cards, () => jamendo())]),
   Source('Deezer', (q, cc) => deezer(q: q), (cc, l) => [Shelf('Global top', Style.cards, () => deezer())]),
+  Source('Openverse', (q, cc) => openverseSearch(q), (cc, l) => [Shelf('Open music', Style.cards, () => openverseSearch('music'))]),
+  Source('Internet Archive', (q, cc) => archiveSearch(q), (cc, l) => [Shelf('Archive audio', Style.cards, () => archiveSearch('music'))]),
 ];
 
 Future<List<Track>> searchAll(String q, String cc) async {
-  final r = await Future.wait([for (final s in registry) s.search(q, cc).catchError((_) => <Track>[]) ]);
-  final rounds = <Track>[];
-  for (var i = 0; r.any((l) => i < l.length); i++) {
-    final round = [for (final l in r) if (i < l.length) l[i]]..sort((a, b) => (a.preview ? 1 : 0) - (b.preview ? 1 : 0));
-    rounds.addAll(round);
+  final normalizedQuery = q.trim();
+  if (normalizedQuery.isEmpty) return [];
+  final results = await Future.wait([
+    for (final s in registry) s.search(normalizedQuery, cc).catchError((_) => <Track>[]),
+  ]);
+  final all = <Track>[];
+  for (final list in results) all.addAll(list);
+
+  String norm(String v) => v.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  final query = norm(normalizedQuery);
+  int score(Track t) {
+    final title = norm(t.title);
+    final artist = norm(t.artist);
+    var n = 0;
+    if (title == query) n += 100;
+    if (title.contains(query)) n += 45;
+    if (artist.contains(query)) n += 30;
+    if (t.url.isNotEmpty) n += 20;
+    if (!t.preview) n += 15;
+    if (t.dl.isNotEmpty) n += 25;
+    if (t.image.isNotEmpty) n += 3;
+    return n;
   }
-  final seen = <String>{};
-  return [for (final t in rounds) if (seen.add('${t.title}|${t.artist}'.toLowerCase())) t];
+  all.sort((a, b) => score(b).compareTo(score(a)));
+
+  final seen = <String, Track>{};
+  for (final t in all) {
+    final key = '${norm(t.title)}|${norm(t.artist)}';
+    if (key.isEmpty || key == '|') continue;
+    final existing = seen[key];
+    if (existing == null || score(t) > score(existing)) seen[key] = t;
+  }
+  return seen.values.toList();
 }
 
 Future<List<Country>> fetchCountries() async {

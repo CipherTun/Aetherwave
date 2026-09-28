@@ -20,7 +20,7 @@ void toast(BuildContext c,String m)=>ScaffoldMessenger.of(c).showSnackBar(SnackB
 void trackMenu(BuildContext context,Track t){
  final s=context.read<AppState>();
  showModalBottomSheet(context:context,showDragHandle:true,builder:(_)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[
-  ListTile(leading:art(t.image,48),title:Text(t.title,maxLines:1),subtitle:Text('${t.artist} · ${t.src}${t.preview?' · preview':''}')),
+  ListTile(leading:art(t.image,48),title:Text(t.title,maxLines:1),subtitle:Text('${t.artist}${t.album.isEmpty ? '' : ' · ${t.album}'}${t.preview ? ' · Preview' : ''}')),
   ListTile(leading:const Icon(Icons.queue_play_next),title:const Text('Play next'),onTap:(){s.playNext(t);Navigator.pop(context);}),
   ListTile(leading:const Icon(Icons.queue_music),title:const Text('Add to queue'),onTap:(){s.addToQueue(t);Navigator.pop(context);}),
   ListTile(leading:const Icon(Icons.comment_outlined),title:const Text('Comments'),onTap:(){Navigator.pop(context);Navigator.push(context,MaterialPageRoute(builder:(_)=>CommentsPage(t.id,t.title)));}),
@@ -29,7 +29,7 @@ void trackMenu(BuildContext context,Track t){
   ListTile(leading:const Icon(Icons.person_outline),title:const Text('Artist'),onTap:(){Navigator.pop(context);Navigator.push(context,MaterialPageRoute(builder:(_)=>ArtistPage(t.artist,t.image)));}),
   ListTile(leading:Icon(s.likes.containsKey(t.id)?Icons.favorite:Icons.favorite_border),title:Text(s.likes.containsKey(t.id)?'Remove from liked':'Like'),onTap:(){s.toggleLike(t);Navigator.pop(context);}),
   if(s.canDownload(t))ListTile(leading:Icon(s.isDownloaded(t)?Icons.delete_outline:Icons.download),title:Text(s.isDownloaded(t)?'Remove download':'Download'),onTap:(){s.isDownloaded(t)?s.removeDownload(t):s.download(t);Navigator.pop(context);})
-  else const ListTile(leading:Icon(Icons.info_outline),title:Text('Download unavailable for this source')),
+  else const ListTile(leading:Icon(Icons.info_outline),title:Text('Download unavailable for this track')),
  ])));
 }
 
@@ -47,7 +47,7 @@ class TrackTile extends StatelessWidget {
     return ListTile(
       leading: art(track.image, 54),
       title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: playing ? accent : null)),
-      subtitle: Text('${track.artist}${track.album.isEmpty ? '' : ' · ${track.album}'} · ${track.src}', maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('${track.artist}${track.album.isEmpty ? '' : ' · ${track.album}'}${track.preview ? ' · Preview' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis),
       onTap: () => state.play(list, i),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
         state.progress.containsKey(track.id)

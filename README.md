@@ -1,41 +1,48 @@
 # Aetherwave
 
-A Flutter music discovery and offline-listening app for Android and iOS.
+A modern Flutter music and podcast application focused on discovery, multi-source playback, permitted offline downloads, local music, playlists, personalization and optional Supabase cloud features.
 
-## Included in this build
+## Production baseline
 
-- Multi-source search: Apple iTunes previews, Apple country charts, Jamendo, Audius and Deezer previews.
-- Personalized Home shelves built from likes, recent listening, followed artists and selected genres.
-- Artist and album pages, artist radio, queues, shuffle/repeat and playback speed.
-- Full-screen player with progress seeking, background/lock-screen playback, lyrics and sleep timer.
-- Local device audio import.
-- Offline downloads only when a source exposes a permitted download URL (currently Jamendo downloads).
-- Download progress and local offline playback.
-- Smart Downloads for permitted liked/recent tracks.
-- Search categories for songs, artists, albums and Podcast Index feeds/episodes.
-- Country chart selector.
-- Library sections for likes, playlists, downloads, local music, artists, albums and history.
-- Supabase accounts and cross-device library sync.
-- Shared playlists.
-- Optional Supabase social layer: comments, user follows and notifications.
-- Optional Creator Studio: upload original audio into a Supabase Storage bucket and publish a creator release record.
-- Light/dark/system theme.
+- Flutter stable 3.47.0
+- Dart SDK compatible with Flutter 3.47
+- Material 3 UI
+- `just_audio` 0.10.6 for playback
+- Supabase Flutter 2.17.2
+- Cached Network Image 4.0.2
+- go_router 18.0.1 available for declarative/deep-link routing work
+- Android target API 36 for 2026 Google Play submissions
 
-## Deliberate boundaries
+Flutter 3.47 is the current stable release documented by Flutter. Google Play's 2026 requirement for new apps and updates is Android 16 / API 36 or higher. The workflow therefore builds against target API 36.  
 
-Aetherwave does not bypass streaming services' restrictions or turn preview-only catalogs into downloadable files. It only downloads when the provider exposes a permitted download URL. Video extraction and copyrighted catalog ripping are not implemented.
+## Providers
 
-The app does not claim to have a proprietary audio DSP/equalizer or music-identification backend without the required provider/API. Those require dedicated native/provider integrations rather than fake UI controls.
+Aetherwave can aggregate permitted content from configured providers such as Jamendo, Audius, Apple/iTunes previews and Podcast Index. Downloading is only enabled when a provider exposes a permitted downloadable URL; preview-only sources remain preview-only.
 
-## Build secrets
-
-Required/optional GitHub Actions secrets:
+## Required GitHub Actions secrets
 
 - `JAMENDO_CLIENT_ID`
-- `AUDIUS_API_KEY` (optional)
-- `PODCASTINDEX_API_KEY` (optional)
-- `PODCASTINDEX_API_SECRET` (optional)
-- `SUPABASE_URL` (optional)
-- `SUPABASE_ANON_KEY` (optional)
+- `AUDIUS_API_KEY`
+- `PODCASTINDEX_API_KEY`
+- `PODCASTINDEX_API_SECRET`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `OPENVERSE_API_TOKEN` (optional; the Openverse API may be used without it, but a token can provide more reliable access)
 
-Run `supabase/schema.sql` once in the Supabase SQL Editor to enable accounts, sync, shared playlists, comments, notifications and Creator Studio uploads.
+## Supabase
+
+Run `supabase/schema.sql` in the Supabase SQL editor when enabling accounts, cloud sync, sharing, comments, notifications and creator storage.
+
+## Build
+
+GitHub Actions generates the native Android/iOS platform projects, applies platform configuration, resolves dependencies, analyzes the project, then produces Android APK/AAB and an unsigned iOS release artifact.
+
+## Unified music provider layer
+
+Aetherwave searches multiple catalog and audio providers behind one internal provider registry. Provider names are intentionally not exposed in the app UI. Search results are normalized, ranked, and deduplicated before they reach the player/library.
+
+Current integrations include Audius, Jamendo, Apple/iTunes catalog previews, Deezer previews, Openverse openly licensed audio, and rights-filtered Internet Archive audio. Apple/iTunes and Deezer are catalog/preview sources; they are not used as full-track download sources. Downloads are only surfaced when the returned source explicitly exposes a permitted downloadable file.
+
+Openverse results are restricted to CC0/public-domain audio for Aetherwave downloads. Internet Archive downloads are restricted to items whose declared license indicates public-domain/CC0-compatible rights. Other Creative Commons content may be playable only when returned by the provider under its applicable terms.
+
+The app does not extract or rip audio from services that do not authorize downloading.

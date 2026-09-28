@@ -1,34 +1,117 @@
-name: Build Aetherwave
-on: [push, workflow_dispatch]
+name: Aetherwave Production Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.0'
+
 jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
-      - uses: subosito/flutter-action@v2
-        with: { channel: stable }
-      - run: flutter create --org com.aether --project-name wave --platforms=android,ios .
-      - run: python3 tool/setup.py
-      - run: flutter pub get
-      - run: flutter build apk --release --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }} --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }} --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }} --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }} --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-      - run: flutter build appbundle --release --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }} --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }} --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }} --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }} --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-      - uses: actions/upload-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
-          name: aetherwave-android
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Generate native Flutter project
+        run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
+
+      - name: Apply production platform configuration
+        run: python3 tool/setup.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build release APK
+        run: >-
+          flutter build apk --release
+          --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
+          --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
+          --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
+          --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }}
+          --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }}
+          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Build Play Store App Bundle
+        run: >-
+          flutter build appbundle --release
+          --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
+          --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
+          --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
+          --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }}
+          --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }}
+          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherwave-android-production
           path: |
             build/app/outputs/flutter-apk/*.apk
             build/app/outputs/bundle/release/*.aab
+
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with: { channel: stable }
-      - run: flutter create --org com.aether --project-name wave --platforms=android,ios .
-      - run: python3 tool/setup.py
-      - run: flutter pub get
-      - run: flutter build ios --release --no-codesign --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }} --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }} --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }} --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }} --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-      - uses: actions/upload-artifact@v4
-        with: { name: aetherwave-ios, path: build/ios/iphoneos/Runner.app }
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Generate native Flutter project
+        run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
+
+      - name: Apply production platform configuration
+        run: python3 tool/setup.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build iOS release
+        run: >-
+          flutter build ios --release --no-codesign
+          --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
+          --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
+          --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
+          --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }}
+          --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }}
+          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherwave-ios-production
+          path: build/ios/iphoneos/Runner.app

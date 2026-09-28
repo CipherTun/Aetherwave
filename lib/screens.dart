@@ -13,7 +13,7 @@ void openPlayer(BuildContext c)=>Navigator.push(c,MaterialPageRoute(builder:(_)=
 class Shell extends StatefulWidget{const Shell({super.key});@override State<Shell>createState()=>_ShellState();}
 class _ShellState extends State<Shell>{int tab=0;final pages=<Widget>[const HomeTab(),const SearchTab(),const LibraryTab()];@override Widget build(BuildContext c){final s=context.watch<AppState>();return Scaffold(body:Stack(children:[IndexedStack(index:tab,children:pages),if(s.current!=null)const Positioned(left:0,right:0,bottom:78,child:MiniPlayer())]),bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.home_outlined),selectedIcon:Icon(Icons.home),label:'Home'),NavigationDestination(icon:Icon(Icons.search),selectedIcon:Icon(Icons.search_rounded),label:'Search'),NavigationDestination(icon:Icon(Icons.library_music_outlined),selectedIcon:Icon(Icons.library_music),label:'Library')]) );}}
 
-class HomeTab extends StatelessWidget{const HomeTab({super.key});String greet(){final h=DateTime.now().hour;return h<12?'Good morning':h<18?'Good afternoon':'Good evening';}@override Widget build(BuildContext c){final s=c.watch<AppState>();final rec=s.recommendations();return ListView(padding:const EdgeInsets.only(bottom:150),children:[Padding(padding:const EdgeInsets.fromLTRB(20,18,8,10),child:Row(children:[Expanded(child:Text(greet(),style:const TextStyle(fontSize:27,fontWeight:FontWeight.w800))),IconButton(icon:const Icon(Icons.public),tooltip:s.countryLabel,onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const CountryPage()))),IconButton(icon:const Icon(Icons.person_outline),onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const AccountPage()))) ])),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:FilledButton.tonalIcon(onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SearchPage())),icon:const Icon(Icons.search),label:const Align(alignment:Alignment.centerLeft,child:Text('Search songs, artists, albums & podcasts')))),if(rec.isNotEmpty)ShelfView(Shelf('Made for you',Style.hero,()=>Future.value(rec))),ShelfView(Shelf('Trending in ${s.countryLabel.isEmpty?s.country:s.countryLabel}',Style.rank,()=>appleChart(s.country).catchError((_) => <Track>[]))),ShelfView(Shelf('Fresh indie picks',Style.cards,()=>jamendo().catchError((_) => <Track>[]))),ShelfView(Shelf('Audius trending',Style.cards,()=>audius().catchError((_) => <Track>[]))),const SizedBox(height:20),Card(margin:const EdgeInsets.all(16),child:ListTile(leading:const Icon(Icons.auto_awesome),title:const Text('Tune your recommendations'),subtitle:const Text('Choose genres in Settings and like more music to personalize Home.'),trailing:const Icon(Icons.chevron_right),onTap:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SettingsPage()))))]);}}
+class HomeTab extends StatelessWidget{const HomeTab({super.key});String greet(){final h=DateTime.now().hour;return h<12?'Good morning':h<18?'Good afternoon':'Good evening';}@override Widget build(BuildContext c){final s=c.watch<AppState>();final rec=s.recommendations();return ListView(padding:const EdgeInsets.only(bottom:150),children:[Padding(padding:const EdgeInsets.fromLTRB(20,18,8,10),child:Row(children:[Expanded(child:Text(greet(),style:const TextStyle(fontSize:27,fontWeight:FontWeight.w800))),IconButton(icon:const Icon(Icons.public),tooltip:s.countryLabel,onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const CountryPage()))),IconButton(icon:const Icon(Icons.person_outline),onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const AccountPage()))) ])),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:FilledButton.tonalIcon(onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SearchPage())),icon:const Icon(Icons.search),label:const Align(alignment:Alignment.centerLeft,child:Text('Search songs, artists, albums & podcasts')))),if(rec.isNotEmpty)ShelfView(Shelf('Made for you',Style.hero,()=>Future.value(rec))),ShelfView(Shelf('Trending in ${s.countryLabel.isEmpty?s.country:s.countryLabel}',Style.rank,()=>appleChart(s.country).catchError((_) => <Track>[]))),ShelfView(Shelf('Fresh discoveries',Style.cards,()=>jamendo().catchError((_) => <Track>[]))),ShelfView(Shelf('Trending now',Style.cards,()=>audius().catchError((_) => <Track>[]))),const SizedBox(height:20),Card(margin:const EdgeInsets.all(16),child:ListTile(leading:const Icon(Icons.auto_awesome),title:const Text('Tune your recommendations'),subtitle:const Text('Choose genres in Settings and like more music to personalize Home.'),trailing:const Icon(Icons.chevron_right),onTap:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SettingsPage()))))]);}}
 
 class ShelfView extends StatefulWidget {
   final Shelf shelf;
@@ -146,7 +146,108 @@ class _SearchTabState extends State<SearchTab> {
 
 class Section extends StatelessWidget{final String title;final Widget child;const Section({super.key,required this.title,required this.child});@override Widget build(BuildContext c)=>Padding(padding:const EdgeInsets.fromLTRB(16,18,16,4),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w800)),const SizedBox(height:8),child]));}
 
-class LibraryTab extends StatelessWidget{const LibraryTab({super.key});@override Widget build(BuildContext c){final s=c.watch<AppState>();return DefaultTabController(length:7,child:Column(children:[const TabBar(isScrollable:true,tabs:[Tab(text:'Liked'),Tab(text:'Playlists'),Tab(text:'Downloads'),Tab(text:'On device'),Tab(text:'Artists'),Tab(text:'Albums'),Tab(text:'History')]),Expanded(child:TabBarView(children:[_list(s.sortedLibrary(s.likes.values),'No liked songs yet'),PlaylistList(s),_list(s.sortedLibrary(s.downloads.values),'No downloads yet'),Column(children:[ListTile(leading:const Icon(Icons.folder_open),title:const Text('Add music from this device'),onTap:s.addLocal),Expanded(child:_list(s.local,'No local music'))]),ArtistLibrary(s),AlbumLibrary(s),_list(s.sortedLibrary(s.recent),'Nothing played yet')]))]));}}
+class LibraryTab extends StatelessWidget {
+  const LibraryTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final items = <_LibraryEntry>[
+      _LibraryEntry('Liked', Icons.favorite_border, _list(state.sortedLibrary(state.likes.values), 'No liked songs yet')),
+      _LibraryEntry('Downloads', Icons.download_outlined, _list(state.sortedLibrary(state.downloads.values), 'No downloads yet')),
+      _LibraryEntry('Playlists', Icons.queue_music_outlined, PlaylistList(state)),
+      _LibraryEntry('Tracks', Icons.music_note_outlined, _list(state.sortedLibrary([...state.likes.values, ...state.downloads.values, ...state.recent]), 'Your saved tracks will appear here')),
+      _LibraryEntry('Albums', Icons.album_outlined, AlbumLibrary(state)),
+      _LibraryEntry('Artists', Icons.person_outline, ArtistLibrary(state)),
+      _LibraryEntry('Podcasts', Icons.podcasts_outlined, const PodcastLibrary()),
+      _LibraryEntry('Stations', Icons.radio_outlined, const StationLibrary()),
+      _LibraryEntry('History', Icons.history, _list(state.sortedLibrary(state.recent), 'Nothing played yet')),
+      _LibraryEntry('On device', Icons.folder_open_outlined, Column(children: [ListTile(leading: const Icon(Icons.library_add_outlined), title: const Text('Import audio from this device'), onTap: state.addLocal), Expanded(child: _list(state.local, 'No local audio yet'))])),
+    ];
+
+    return SafeArea(
+      child: DefaultTabController(
+        length: 2,
+        child: NestedScrollView(
+          headerSliverBuilder: (_, __) => [
+            SliverAppBar(
+              pinned: true,
+              title: const Text('Your Library'),
+              actions: [
+                IconButton(tooltip: 'Settings', icon: const Icon(Icons.tune_outlined), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()))),
+              ],
+              bottom: const TabBar(tabs: [Tab(text: 'Collections'), Tab(text: 'Activity')]),
+            ),
+          ],
+          body: TabBarView(children: [
+            ListView(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 140),
+              children: [
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: items.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.55),
+                  itemBuilder: (_, i) => _LibraryCard(entry: items[i], onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _LibrarySectionPage(entry: items[i])))),
+                ),
+              ],
+            ),
+            _list(state.sortedLibrary(state.recent), 'Your listening activity will appear here'),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _LibraryEntry {
+  final String title;
+  final IconData icon;
+  final Widget page;
+  const _LibraryEntry(this.title, this.icon, this.page);
+}
+
+class _LibraryCard extends StatelessWidget {
+  final _LibraryEntry entry;
+  final VoidCallback onTap;
+  const _LibraryCard({required this.entry, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Icon(entry.icon, size: 27, color: scheme.primary),
+            Row(children: [Expanded(child: Text(entry.title, style: const TextStyle(fontWeight: FontWeight.w750))), const Icon(Icons.arrow_forward_ios_rounded, size: 14)]),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _LibrarySectionPage extends StatelessWidget {
+  final _LibraryEntry entry;
+  const _LibrarySectionPage({required this.entry});
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(entry.title)), body: entry.page);
+}
+
+class PodcastLibrary extends StatelessWidget {
+  const PodcastLibrary({super.key});
+  @override
+  Widget build(BuildContext context) => const Center(child: Padding(padding: EdgeInsets.all(32), child: Text('Followed podcasts and downloaded episodes will appear here.', textAlign: TextAlign.center)));
+}
+
+class StationLibrary extends StatelessWidget {
+  const StationLibrary({super.key});
+  @override
+  Widget build(BuildContext context) => const Center(child: Padding(padding: EdgeInsets.all(32), child: Text('Your personalized and genre stations will appear here.', textAlign: TextAlign.center)));
+}
+
 Widget _list(List<Track> l,String empty)=>l.isEmpty?Center(child:Text(empty)):ListView.builder(padding:const EdgeInsets.only(bottom:130),itemCount:l.length,itemBuilder:(_,i)=>TrackTile(l,i));
 class PlaylistList extends StatelessWidget{final AppState s;const PlaylistList(this.s,{super.key});@override Widget build(BuildContext c)=>ListView(children:[ListTile(leading:const Icon(Icons.add_box_outlined),title:const Text('New playlist'),onTap:()async{final n=await askName(c);if(n!=null)s.createPlaylist(n);}),if(cloudOn)ListTile(leading:const Icon(Icons.cloud_download_outlined),title:const Text('Import shared playlist'),onTap:()async{final n=await askName(c,title:'Paste share code');if(n!=null)toast(c,await s.importPlaylist(n.trim())?'Imported':'Not found');}),for(final e in s.playlists.entries)ListTile(leading:const Icon(Icons.queue_music),title:Text(e.key),subtitle:Text('${e.value.length} songs'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()=>s.deletePlaylist(e.key)),onTap:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>PlaylistPage(e.key))))]);}
 class ArtistLibrary extends StatelessWidget{final AppState s;const ArtistLibrary(this.s,{super.key});@override Widget build(BuildContext c)=>s.follows.isEmpty?const Center(child:Text('Follow artists to see them here')):ListView(children:[for(final a in s.follows)ListTile(leading:CircleAvatar(child:Text(a.isEmpty?'?':a[0].toUpperCase())),title:Text(a),trailing:const Icon(Icons.chevron_right),onTap:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>ArtistPage(a,''))))]);}
