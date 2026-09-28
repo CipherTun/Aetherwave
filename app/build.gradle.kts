@@ -9,7 +9,7 @@ android {
     namespace = "com.ciphertun.aetherwave"
     // Bump compileSdk to whatever Android Studio currently offers as stable —
     // 34 is used here as a safe, long-established baseline.
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ciphertun.aetherwave"
@@ -18,7 +18,7 @@ android {
         // library desugaring. Your own device is API 29, so this costs you
         // nothing — it just excludes Android 7.0/7.1 (API 24-25) users.
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 3
         versionName = "0.3.0"
 
