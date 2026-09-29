@@ -15,6 +15,7 @@ jobs:
   android:
     name: Android ${{ matrix.name }}
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +37,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Flutter stable
         uses: subosito/flutter-action@v2
@@ -52,19 +53,131 @@ jobs:
         run: python3 tool/setup.py
 
       - name: Configure release signing
+        shell: bash
         env:
           RELEASE_BASE64: ${{ secrets.RELEASE_BASE64 }}
           LOCAL_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
         run: |
           set -euo pipefail
-          printf "%s" "$LOCAL_PROPERTIES" | base64 --decode > android/key.properties
-          printf "%s" "$RELEASE_BASE64" | base64 --decode > android/Aetherwave.jks
+
+          printf '%s' "$LOCAL_PROPERTIES" | base64 --decode > android/key.properties
+          printf '%s' "$RELEASE_BASE64" | base64 --decode > android/Aetherwave.jks
+
           test -s android/key.properties
           test -s android/Aetherwave.jks
 
+          echo "[OK] Signing files created"
+
       - name: Configure Android release build
+        shell: bash
         run: |
-          python3 -c "from pathlib import Path; import re; p=Path(\"android/app/build.gradle.kts\"); s=p.read_text(); s=re.sub(r\x27namespace\\s*=\\s*\x22[^\x22]+\x22\x27, \x27namespace = \x22com.aether.wave\x22\x27, s, count=1); s=re.sub(r\x27applicationId\\s*=\\s*\x22[^\x22]+\x22\x27, \x27applicationId = \x22com.aether.wave\x22\x27, s, count=1); loader=\x27import java.io.FileInputStream\\nimport java.util.Properties\\n\\nval keystoreProperties = Properties()\\nval keystorePropertiesFile = rootProject.file(\x22key.properties\")\\nrequire(keystorePropertiesFile.exists()) { \x22android/key.properties is required.\x22 }\\nkeystoreProperties.load(FileInputStream(keystorePropertiesFile))\\n\\n\x27; s=s.replace(\x22android {\x22,loader+\x22android {\x22,1) if \x22val keystorePropertiesFile = rootProject.file\x22 not in s else s; signing=\x27    signingConfigs {\\n        create(\x22release\") {\\n            keyAlias = keystoreProperties.getProperty(\x22keyAlias\")\\n            keyPassword = keystoreProperties.getProperty(\x22keyPassword\")\\n            storeFile = keystoreProperties.getProperty(\x22storeFile\").let { rootProject.file(it) }\\n            storePassword = keystoreProperties.getProperty(\x22storePassword\")\\n        }\\n    }\\n\\n\x27; s=s.replace(\x22    buildTypes {\x22,signing+\x22    buildTypes {\x22,1) if \x27create(\x22release\")\x27 not in s else s; s=re.sub(r\x22    buildTypes \\{.*?\\n    \\}\\n\\}\x22,\x27    buildTypes {\\n        getByName(\x22release\") {\\n            signingConfig = signingConfigs.getByName(\x22release\")\\n            isMinifyEnabled = false\\n            isShrinkResources = false\\n        }\\n    }\\n}\x27,s,count=1,flags=re.S); p.write_text(s); print(\x22[OK] com.aether.wave\"); print(\x22[OK] R8/minification disabled\"); print(\x22[OK] resource shrinking disabled\")"
+          set -euo pipefail
+
+          python3 <<'PYCONFIG'
+from pathlib import Path
+import re
+
+path = Path("android/app/build.gradle.kts")
+text = path.read_text()
+
+# Application ID and namespace.
+text = re.sub(
+    r'namespace\s*=\s*"[^"]+"',
+    'namespace = "com.aether.wave"',
+    text,
+    count=1,
+)
+
+text = re.sub(
+    r'applicationId\s*=\s*"[^"]+"',
+    'applicationId = "com.aether.wave"',
+    text,
+    count=1,
+)
+
+# Keystore configuration.
+if "val keystorePropertiesFile = rootProject.file" not in text:
+    loader = """import java.io.FileInputStream
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+require(keystorePropertiesFile.exists()) {
+    "android/key.properties is required."
+}
+
+keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+
+"""
+    text = text.replace("android {", loader + "android {", 1)
+
+# Release signing configuration.
+if 'create("release")' not in text:
+    signing = """    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            storeFile = keystoreProperties.getProperty("storeFile")?.let {
+                rootProject.file(it)
+            }
+            storePassword = keystoreProperties.getProperty("storePassword")
+        }
+    }
+
+"""
+    text = text.replace(
+        "    buildTypes {",
+        signing + "    buildTypes {",
+        1,
+    )
+
+# Replace the generated buildTypes block.
+pattern = r'    buildTypes\s*\{.*?\n    \}\n\}'
+
+replacement = """    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+
+            // R8/minification explicitly disabled.
+            isMinifyEnabled = false
+
+            // Resource shrinking explicitly disabled.
+            isShrinkResources = false
+        }
+    }
+}"""
+
+text, count = re.subn(
+    pattern,
+    replacement,
+    text,
+    count=1,
+    flags=re.DOTALL,
+)
+
+if count != 1:
+    raise SystemExit("ERROR: Could not locate the generated buildTypes block.")
+
+path.write_text(text)
+
+assert 'namespace = "com.aether.wave"' in text
+assert 'applicationId = "com.aether.wave"' in text
+assert 'isMinifyEnabled = false' in text
+assert 'isShrinkResources = false' in text
+assert 'signingConfigs.getByName("release")' in text
+
+print("[OK] Application ID: com.aether.wave")
+print("[OK] Release signing configured")
+print("[OK] R8/minification disabled")
+print("[OK] Resource shrinking disabled")
+PYCONFIG
+
+          echo
+          echo "========== RELEASE CONFIG =========="
+          grep -nE \
+            'namespace|applicationId|isMinifyEnabled|isShrinkResources|signingConfig' \
+            android/app/build.gradle.kts
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -73,6 +186,7 @@ jobs:
         run: flutter analyze --no-fatal-infos
 
       - name: Build Android release APK
+        shell: bash
         env:
           JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           AUDIUS_API_KEY: ${{ secrets.AUDIUS_API_KEY }}
@@ -84,14 +198,33 @@ jobs:
         run: |
           set -euo pipefail
 
+          COMMON_ARGS=(
+            --release
+            --no-shrink
+            "--dart-define=JAMENDO_CLIENT_ID=$JAMENDO_CLIENT_ID"
+            "--dart-define=AUDIUS_API_KEY=$AUDIUS_API_KEY"
+            "--dart-define=OPENVERSE_API_TOKEN=$OPENVERSE_API_TOKEN"
+            "--dart-define=PODCASTINDEX_API_KEY=$PODCASTINDEX_API_KEY"
+            "--dart-define=PODCASTINDEX_API_SECRET=$PODCASTINDEX_API_SECRET"
+            "--dart-define=SUPABASE_URL=$SUPABASE_URL"
+            "--dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
+          )
+
           if [ "${{ matrix.target }}" = "universal" ]; then
-            flutter build apk --release --no-shrink               --dart-define=JAMENDO_CLIENT_ID="$JAMENDO_CLIENT_ID"               --dart-define=AUDIUS_API_KEY="$AUDIUS_API_KEY"               --dart-define=OPENVERSE_API_TOKEN="$OPENVERSE_API_TOKEN"               --dart-define=PODCASTINDEX_API_KEY="$PODCASTINDEX_API_KEY"               --dart-define=PODCASTINDEX_API_SECRET="$PODCASTINDEX_API_SECRET"               --dart-define=SUPABASE_URL="$SUPABASE_URL"               --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+            flutter build apk "${COMMON_ARGS[@]}"
           else
-            flutter build apk --release --no-shrink               --target-platform "${{ matrix.target }}"               --dart-define=JAMENDO_CLIENT_ID="$JAMENDO_CLIENT_ID"               --dart-define=AUDIUS_API_KEY="$AUDIUS_API_KEY"               --dart-define=OPENVERSE_API_TOKEN="$OPENVERSE_API_TOKEN"               --dart-define=PODCASTINDEX_API_KEY="$PODCASTINDEX_API_KEY"               --dart-define=PODCASTINDEX_API_SECRET="$PODCASTINDEX_API_SECRET"               --dart-define=SUPABASE_URL="$SUPABASE_URL"               --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+            flutter build apk \
+              "${COMMON_ARGS[@]}" \
+              --target-platform "${{ matrix.target }}"
           fi
 
           mkdir -p "dist/${{ matrix.name }}"
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
+
+          cp \
+            build/app/outputs/flutter-apk/app-release.apk \
+            "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
+
+          test -s "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
 
       - name: Upload Android release APK
         uses: actions/upload-artifact@v4
