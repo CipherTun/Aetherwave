@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:xml/xml.dart';
 
 const jamendoId = String.fromEnvironment('JAMENDO_CLIENT_ID');
 const audiusKey = String.fromEnvironment('AUDIUS_API_KEY');
@@ -7,6 +8,10 @@ const openverseToken = String.fromEnvironment('OPENVERSE_API_TOKEN');
 const podcastIndexKey = String.fromEnvironment('PODCASTINDEX_API_KEY');
 const podcastIndexSecret = String.fromEnvironment('PODCASTINDEX_API_SECRET');
 const appName = 'Aetherwave';
+
+const freeToUseBase = 'https://api.freetouse.com/v3';
+const audiusBase = 'https://api.audius.co/v1';
+
 
 class Track {
   final String id, src, title, artist, image, url, dl;
@@ -94,6 +99,83 @@ Future<List<Track>> audius({String? q}) async {
 
 Track _deezer(Map j) => Track('dz${j['id']}', 'Deezer', j['title'] ?? '', j['artist']?['name'] ?? '', j['album']?['cover_xl'] ?? j['album']?['cover_medium'] ?? '', j['preview'] ?? '', '', true,
     album: j['album']?['title'] ?? '');
+
+Track _freeToUse(Map<String, dynamic> j) {
+  final artists = (j['artists'] as List? ?? []);
+  final artistNames = <String>[];
+
+  for (final entry in artists) {
+    if (entry is List && entry.length > 1) {
+      final artist = entry[1];
+      if (artist is Map) {
+        final name = '${artist['name'] ?? ''}'.trim();
+        if (name.isNotEmpty) {
+          artistNames.add(name);
+        }
+      }
+    }
+  }
+
+  final thumbnails =
+      Map<String, dynamic>.from((j['thumbnails'] as Map?) ?? const {});
+  final files =
+      Map<String, dynamic>.from((j['files'] as Map?) ?? const {});
+
+  final audioUrl = '${files['mp3'] ?? ''}';
+  final releaseDate = '${j['release_date'] ?? ''}';
+
+  return Track(
+    'ftu${j['id']}',
+    'FreeToUse',
+    '${j['title'] ?? ''}',
+    artistNames.join(', '),
+    '${thumbnails['lg'] ?? thumbnails['md'] ?? thumbnails['sm'] ?? ''}',
+    audioUrl,
+    audioUrl,
+    false,
+    genre: '${j['genre'] ?? ''}',
+    durationMs: j['duration'] is num
+        ? ((j['duration'] as num) * 1000).round()
+        : null,
+    year: releaseDate.length >= 4
+        ? int.tryParse(releaseDate.substring(0, 4))
+        : null,
+    license: 'Free To Use License',
+    licenseUrl: 'https://freetouse.com/license',
+  );
+}
+
+Future<List<Track>> freeToUse({String? q}) async {
+  final path =
+      q == null ? '/music/tracks/all' : '/music/tracks/search';
+
+  final query = <String, String>{
+    'limit': '50',
+    'order': q == null ? 'release_date' : 'plays',
+    'sort': 'desc',
+    if (q != null) 'query': q,
+  };
+
+  final d = await _get(
+    Uri.https(
+      'api.freetouse.com',
+      '/v3$path',
+      query,
+    ),
+  );
+
+  final data = (d['data'] as List? ?? []);
+
+  return [
+    for (final raw in data)
+      if (raw is Map &&
+          '${raw['status'] ?? 1}' == '1' &&
+          '${raw['files']?['mp3'] ?? ''}'.isNotEmpty)
+        _freeToUse(
+          Map<String, dynamic>.from(raw),
+        ),
+  ];
+}
 
 Future<List<Track>> deezer({String? q}) async {
   final d = q == null ? await _get(Uri.https('api.deezer.com', '/chart/0/tracks')) : await _get(Uri.https('api.deezer.com', '/search', {'q': q, 'limit': '50'}));
@@ -187,18 +269,329 @@ class Source {
 }
 
 final registry = <Source>[
+  Source(
+    'ccMixter',
+    (q, cc) => ccMixterSearch(q),
+    (cc, l) => [
+      Shelf(
+        'Creative Commons music',
+        Style.cards,
+        () => ccMixterSearch('music'),
+      ),
+    ],
+  ),
+
+  Source(
+    'FreeToUse',
+    (q, cc) => freeToUseSearch(q),
+    (cc, l) => [
+      Shelf(
+        'Free music',
+        Style.cards,
+        () => freeToUseSearch('music'),
+      ),
+    ],
+  ),
+
   Source('iTunes', (q, cc) async => [...await itunesSearch(q, null).catchError((_) => <Track>[]), ...await itunesSearch(q, cc).catchError((_) => <Track>[])], (cc, l) => [Shelf('Top songs in $l', Style.rank, () => appleChart(cc))]),
   Source('Audius', (q, cc) => audius(q: q), (cc, l) => [Shelf('Trending now', Style.hero, () => audius())]),
   Source('Jamendo', (q, cc) => jamendo(q: q), (cc, l) => [Shelf('Fresh indie picks', Style.cards, () => jamendo())]),
   Source('Deezer', (q, cc) => deezer(q: q), (cc, l) => [Shelf('Global top', Style.cards, () => deezer())]),
   Source('Openverse', (q, cc) => openverseSearch(q), (cc, l) => [Shelf('Open music', Style.cards, () => openverseSearch('music'))]),
   Source('Internet Archive', (q, cc) => archiveSearch(q), (cc, l) => [Shelf('Archive audio', Style.cards, () => archiveSearch('music'))]),
+  Source('FreeToUse', (q, cc) => freeToUse(q: q), (cc, l) => [Shelf('Royalty-free picks', Style.cards, () => freeToUse())]),
 ];
+
+
+
+Future<List<Track>> freeToUseSearch(String query) async {
+  try {
+    final uri = Uri.parse(
+      '$freeToUseBase/music/tracks/search',
+    ).replace(
+      queryParameters: {
+        'query': query,
+        'limit': '50',
+        'order': 'release_date',
+        'sort': 'desc',
+      },
+    );
+
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    final body = jsonDecode(response.body);
+    final data = body is Map ? body['data'] : body;
+
+    if (data is! List) return [];
+
+    return data.whereType<Map>().map((j) {
+      final files = j['files'] is Map
+          ? j['files'] as Map
+          : <dynamic, dynamic>{};
+
+      final mp3 = '${files['mp3'] ?? ''}';
+
+      final thumbnails = j['thumbnails'] is Map
+          ? j['thumbnails'] as Map
+          : <dynamic, dynamic>{};
+
+      final artwork =
+          '${thumbnails['large'] ?? thumbnails['medium'] ?? thumbnails['small'] ?? ''}';
+
+      final artists = j['artists'];
+
+      String artist;
+
+      if (artists is List) {
+        artist = artists.map((e) {
+          if (e is Map) return '${e['name'] ?? ''}';
+          return '$e';
+        }).where((e) => e.trim().isNotEmpty).join(', ');
+      } else {
+        artist = '${j['artist'] ?? ''}';
+      }
+
+      final duration = num.tryParse('${j['duration'] ?? ''}');
+
+      return Track(
+        'freetouse:${j['id'] ?? ''}',
+        'freetouse',
+        '${j['title'] ?? ''}',
+        artist,
+        artwork,
+        '${j['url'] ?? ''}',
+        mp3,
+        false,
+        album: '',
+        genre: '${j['genre'] ?? ''}',
+        year: j['release_date'] == null
+            ? null
+            : int.tryParse('${j['release_date']}'.substring(0, 4)),
+        durationMs: duration == null
+            ? null
+            : (duration * 1000).round(),
+        license: '${j['license'] ?? ''}',
+        licenseUrl: '${j['license_url'] ?? ''}',
+      );
+    }).where((track) {
+      return track.title.trim().isNotEmpty &&
+          track.artist.trim().isNotEmpty;
+    }).toList();
+  } catch (_) {
+    return [];
+  }
+}
+
+
+
+Future<List<Track>> audiusFullSearch(String query) async {
+  try {
+    final uri = Uri.parse('$audiusBase/tracks/search').replace(
+      queryParameters: {
+        'query': query,
+        'limit': '50',
+        'sortMethod': 'relevant',
+      },
+    );
+
+    final response = await http.get(
+      uri,
+      headers: audiusKey.isEmpty
+          ? {}
+          : {'Authorization': 'Bearer $audiusKey'},
+    );
+
+    if (response.statusCode != 200) return [];
+
+    final body = jsonDecode(response.body);
+    final data = body is Map ? body['data'] : null;
+
+    if (data is! List) return [];
+
+    return data.whereType<Map>().map((j) {
+      final id = '${j['id'] ?? ''}';
+      final title = '${j['title'] ?? ''}';
+
+      final user = j['user'] is Map
+          ? j['user'] as Map
+          : <dynamic, dynamic>{};
+
+      final artist =
+          '${user['name'] ?? user['handle'] ?? ''}';
+
+      final artwork = j['artwork'] is Map
+          ? '${(j['artwork'] as Map)['_1000x1000'] ?? (j['artwork'] as Map)['_480x480'] ?? ''}'
+          : '';
+
+      final duration = num.tryParse('${j['duration'] ?? ''}');
+
+      final streamable =
+          j['isStreamable'] == true ||
+          j['isStreamable'] == 'true';
+
+      final downloadable =
+          j['downloadable'] == true ||
+          j['downloadable'] == 'true' ||
+          j['isDownloadable'] == true;
+
+      return Track(
+        'audius:$id',
+        'audius',
+        title,
+        artist,
+        artwork,
+        id.isEmpty ? '' : 'https://audius.co/$id',
+        downloadable && id.isNotEmpty
+            ? '$audiusBase/tracks/$id/download'
+            : '',
+        !streamable,
+        album: '',
+        genre: '${j['genre'] ?? ''}',
+        year: j['releaseDate'] == null
+            ? null
+            : int.tryParse(
+                '${j['releaseDate']}'.substring(0, 4),
+              ),
+        durationMs: duration == null
+            ? null
+            : (duration * 1000).round(),
+        license: '',
+        licenseUrl: '',
+      );
+    }).where((track) {
+      return track.title.trim().isNotEmpty &&
+          track.artist.trim().isNotEmpty;
+    }).toList();
+  } catch (_) {
+    return [];
+  }
+}
+
+
+
+Future<List<Track>> ccMixterSearch(String q) async {
+  try {
+    final uri = Uri.parse(
+      ccMixterBase,
+    ).replace(
+      queryParameters: {
+        'search': q,
+        'search_type': 'match',
+        'f': 'rss',
+        'limit': '30',
+      },
+    );
+
+    final response = await http.get(
+      uri,
+      headers: {
+        'Accept': 'application/rss+xml, application/xml',
+        'User-Agent': '$appName/2.2',
+      },
+    ).timeout(const Duration(seconds: 18));
+
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300) {
+      return [];
+    }
+
+    final document = XmlDocument.parse(
+      utf8.decode(response.bodyBytes),
+    );
+
+    final result = <Track>[];
+
+    for (final item in document.findAllElements('item')) {
+      final title = item
+          .getElement('title')
+          ?.innerText
+          .trim() ?? '';
+
+      final link = item
+          .getElement('link')
+          ?.innerText
+          .trim() ?? '';
+
+      String artist = '';
+
+      for (final node in item.children) {
+        if (node is! XmlElement) continue;
+
+        final localName =
+            node.name.local.toLowerCase();
+
+        if (localName == 'creator' ||
+            localName == 'author') {
+          artist = node.innerText.trim();
+
+          if (artist.isNotEmpty) {
+            break;
+          }
+        }
+      }
+
+      final enclosure =
+          item.getElement('enclosure');
+
+      final mediaUrl =
+          enclosure?.getAttribute('url')?.trim() ?? '';
+
+      if (title.isEmpty || mediaUrl.isEmpty) {
+        continue;
+      }
+
+      String license = '';
+      String licenseUrl = '';
+
+      for (final node in item.children) {
+        if (node is! XmlElement) continue;
+
+        if (node.name.local.toLowerCase() != 'license') {
+          continue;
+        }
+
+        license = node.innerText.trim();
+
+        licenseUrl =
+            node.getAttribute('rdf:resource')?.trim() ??
+            node.getAttribute('resource')?.trim() ??
+            '';
+
+        break;
+      }
+
+      result.add(
+        Track(
+          'ccmixter:${mediaUrl.hashCode}',
+          'ccMixter',
+          title,
+          artist.isEmpty
+              ? 'ccMixter artist'
+              : artist,
+          '',
+          link.isEmpty ? mediaUrl : link,
+          mediaUrl,
+          false,
+          license: license,
+          licenseUrl: licenseUrl,
+        ),
+      );
+    }
+
+    return result;
+  } catch (_) {
+    return [];
+  }
+}
 
 Future<List<Track>> searchAll(String q, String cc) async {
   final normalizedQuery = q.trim();
   if (normalizedQuery.isEmpty) return [];
   final results = await Future.wait([
+      audiusFullSearch(query),
+      freeToUseSearch(query),
     for (final s in registry) s.search(normalizedQuery, cc).catchError((_) => <Track>[]),
   ]);
   final all = <Track>[];
@@ -216,6 +609,8 @@ Future<List<Track>> searchAll(String q, String cc) async {
     if (t.url.isNotEmpty) n += 20;
     if (!t.preview) n += 15;
     if (t.dl.isNotEmpty) n += 25;
+    if (!t.preview) n += 10;
+    if (t.album.trim().isNotEmpty) n += 4;
     if (t.image.isNotEmpty) n += 3;
     return n;
   }

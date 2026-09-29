@@ -10,8 +10,215 @@ import 'social.dart';
 
 void openPlayer(BuildContext c)=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const PlayerPage()));
 
-class Shell extends StatefulWidget{const Shell({super.key});@override State<Shell>createState()=>_ShellState();}
-class _ShellState extends State<Shell>{int tab=0;final pages=<Widget>[const HomeTab(),const SearchTab(),const LibraryTab()];@override Widget build(BuildContext c){final s=context.watch<AppState>();return Scaffold(body:Stack(children:[IndexedStack(index:tab,children:pages),if(s.current!=null)const Positioned(left:0,right:0,bottom:78,child:MiniPlayer())]),bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.home_outlined),selectedIcon:Icon(Icons.home),label:'Home'),NavigationDestination(icon:Icon(Icons.search),selectedIcon:Icon(Icons.search_rounded),label:'Search'),NavigationDestination(icon:Icon(Icons.library_music_outlined),selectedIcon:Icon(Icons.library_music),label:'Library')]) );}}
+class Shell extends StatefulWidget {
+  const Shell({super.key});
+
+  @override
+  State<Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<Shell> {
+  int tab = 0;
+
+  static const pages = <Widget>[
+    HomeTab(),
+    DiscoverTab(),
+    SearchTab(),
+    LibraryTab(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: tab,
+            children: pages,
+          ),
+          if (state.current != null)
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 82,
+              child: MiniPlayer(),
+            ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: tab,
+        onDestinationSelected: (index) {
+          if (index == tab) return;
+
+          setState(() {
+            tab = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.explore_outlined),
+            selectedIcon: Icon(Icons.explore_rounded),
+            label: 'Discover',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.search_outlined),
+            selectedIcon: Icon(Icons.search_rounded),
+            label: 'Search',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.library_music_outlined),
+            selectedIcon: Icon(Icons.library_music_rounded),
+            label: 'Library',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DiscoverTab extends StatelessWidget {
+  const DiscoverTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+
+    return CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          pinned: true,
+          title: const Text('Discover'),
+          actions: [
+            IconButton(
+              tooltip: 'Country',
+              icon: const Icon(Icons.public_outlined),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CountryPage(),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              20,
+              10,
+              20,
+              8,
+            ),
+            child: Text(
+              'Find something new',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: const [
+                ActionChip(
+                  avatar: Icon(
+                    Icons.trending_up_rounded,
+                    size: 18,
+                  ),
+                  label: Text('Trending'),
+                ),
+                ActionChip(
+                  avatar: Icon(
+                    Icons.fiber_new_rounded,
+                    size: 18,
+                  ),
+                  label: Text('New music'),
+                ),
+                ActionChip(
+                  avatar: Icon(
+                    Icons.category_outlined,
+                    size: 18,
+                  ),
+                  label: Text('Genres'),
+                ),
+                ActionChip(
+                  avatar: Icon(
+                    Icons.radio_rounded,
+                    size: 18,
+                  ),
+                  label: Text('Radio'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: ShelfView(
+            Shelf(
+              'Trending now',
+              Style.rank,
+              () => appleChart(
+                state.country,
+              ).catchError(
+                (_) => <Track>[],
+              ),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: ShelfView(
+            Shelf(
+              'Fresh discoveries',
+              Style.cards,
+              () => jamendo().catchError(
+                (_) => <Track>[],
+              ),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: ShelfView(
+            Shelf(
+              'Independent music',
+              Style.cards,
+              () => freeToUseSearch('music'),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: ShelfView(
+            Shelf(
+              'Creative Commons',
+              Style.cards,
+              () => ccMixterSearch('music'),
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(
+          child: SizedBox(height: 150),
+        ),
+      ],
+    );
+  }
+}
 
 class HomeTab extends StatelessWidget{const HomeTab({super.key});String greet(){final h=DateTime.now().hour;return h<12?'Good morning':h<18?'Good afternoon':'Good evening';}@override Widget build(BuildContext c){final s=c.watch<AppState>();final rec=s.recommendations();return ListView(padding:const EdgeInsets.only(bottom:150),children:[Padding(padding:const EdgeInsets.fromLTRB(20,18,8,10),child:Row(children:[Expanded(child:Text(greet(),style:const TextStyle(fontSize:27,fontWeight:FontWeight.w800))),IconButton(icon:const Icon(Icons.public),tooltip:s.countryLabel,onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const CountryPage()))),IconButton(icon:const Icon(Icons.person_outline),onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const AccountPage()))) ])),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:FilledButton.tonalIcon(onPressed:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SearchPage())),icon:const Icon(Icons.search),label:const Align(alignment:Alignment.centerLeft,child:Text('Search songs, artists, albums & podcasts')))),if(rec.isNotEmpty)ShelfView(Shelf('Made for you',Style.hero,()=>Future.value(rec))),ShelfView(Shelf('Trending in ${s.countryLabel.isEmpty?s.country:s.countryLabel}',Style.rank,()=>appleChart(s.country).catchError((_) => <Track>[]))),ShelfView(Shelf('Fresh discoveries',Style.cards,()=>jamendo().catchError((_) => <Track>[]))),ShelfView(Shelf('Trending now',Style.cards,()=>audius().catchError((_) => <Track>[]))),const SizedBox(height:20),Card(margin:const EdgeInsets.all(16),child:ListTile(leading:const Icon(Icons.auto_awesome),title:const Text('Tune your recommendations'),subtitle:const Text('Choose genres in Settings and like more music to personalize Home.'),trailing:const Icon(Icons.chevron_right),onTap:()=>Navigator.push(c,MaterialPageRoute(builder:(_)=>const SettingsPage()))))]);}}
 
