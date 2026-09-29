@@ -276,27 +276,11 @@ void queueSheet(BuildContext c){
                   trailing:PopupMenuButton<String>(
                     onSelected:(value){
                       if(value=='next'){
-                        state.queue.removeAt(i);
-                        state.queue.insert(
-                          state.index+1,
-                          track,
-                        );
-                        state.notifyListeners();
+                        state.moveQueueNext(i);
                       }
 
-                      if(value=='remove'&&
-                          state.queue.length>1){
-                        state.queue.removeAt(i);
-
-                        if(i<state.index){
-                          state.index--;
-                        }else if(
-                            state.index>=state.queue.length){
-                          state.index=
-                              state.queue.length-1;
-                        }
-
-                        state.notifyListeners();
+                      if(value=='remove'){
+                        state.removeQueueAt(i);
                       }
                     },
                     itemBuilder:(_)=>const[

@@ -152,8 +152,59 @@ class AppState extends ChangeNotifier {
   }
   Future<void> next({bool auto=false})async{if(queue.isEmpty)return;var n=shuffle?Random().nextInt(queue.length):index+1;if(n>=queue.length){if(repeat==1||!auto)n=0;else return;}await play(queue,n);}
   Future<void> prev()async{if(player.position.inSeconds>3||index==0)return player.seek(Duration.zero);await play(queue,index-1);}
-  void playNext(Track t){queue.insert(queue.isEmpty?0:index+1,t);notifyListeners();}
-  void addToQueue(Track t){queue.add(t);notifyListeners();}
+  void playNext(Track t){
+    if(queue.isEmpty){
+      queue.add(t);
+    }else{
+      queue.insert(index+1,t);
+    }
+    notifyListeners();
+  }
+
+  void addToQueue(Track t){
+    queue.add(t);
+    notifyListeners();
+  }
+
+  void moveQueueNext(int queueIndex){
+    if(queueIndex<0||
+        queueIndex>=queue.length||
+        queueIndex==index||
+        queue.length<2){
+      return;
+    }
+
+    final track=queue.removeAt(queueIndex);
+
+    if(queueIndex<index){
+      index--;
+    }
+
+    final target=(index+1).clamp(0,queue.length);
+    queue.insert(target,track);
+    notifyListeners();
+  }
+
+  void removeQueueAt(int queueIndex){
+    if(queue.length<=1||
+        queueIndex<0||
+        queueIndex>=queue.length||
+        queueIndex==index){
+      return;
+    }
+
+    queue.removeAt(queueIndex);
+
+    if(queueIndex<index){
+      index--;
+    }
+
+    if(index>=queue.length){
+      index=queue.length-1;
+    }
+
+    notifyListeners();
+  }
   void addSearch(String q){searches=[q,...searches.where((x)=>x!=q)].take(20).toList();p.setStringList('searches',searches);notifyListeners();}
   void clearSearches(){searches=[];p.remove('searches');notifyListeners();}
   void toggleShuffle(){shuffle=!shuffle;notifyListeners();}
