@@ -15,7 +15,21 @@ svc = ('<service android:name="com.ryanheise.audioservice.AudioService" android:
 x = x.replace('</application>', svc + '</application>', 1)
 open(m, 'w').write(x)
 for k in glob.glob('android/app/src/main/kotlin/**/MainActivity.kt', recursive=True):
-    open(k, 'w').write('package com.aetherwave.aetherwave\n\nimport com.ryanheise.audioservice.AudioServiceActivity\n\nclass MainActivity : AudioServiceActivity()\n')
+    open(k, 'w').write('package com.aether.wave\n\nimport com.ryanheise.audioservice.AudioServiceActivity\n\nclass MainActivity : AudioServiceActivity()\n')
+# Keep Android launcher activity aligned with applicationId.
+main_activity = Path("android/app/src/main/kotlin/com/aether/wave/MainActivity.kt")
+main_activity.parent.mkdir(parents=True, exist_ok=True)
+
+for old_activity in Path("android/app/src/main/kotlin").rglob("MainActivity.kt"):
+    if old_activity != main_activity:
+        old_activity.unlink()
+
+main_activity.write_text(
+    "package com.aether.wave\n\n"
+    "import com.ryanheise.audioservice.AudioServiceActivity\n\n"
+    "class MainActivity : AudioServiceActivity()\n"
+)
+
 p = 'ios/Runner/Info.plist'
 x = open(p).read()
 x = re.sub(r'(<key>CFBundleDisplayName</key>\s*<string>)[^<]*', r'\1Aetherwave', x)
