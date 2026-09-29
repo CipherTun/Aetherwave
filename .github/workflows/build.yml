@@ -2,18 +2,16 @@ name: Aetherwave Build
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  FLUTTER_VERSION: "3.47.0"
+  FLUTTER_VERSION: '3.47.0'
 
 jobs:
-
   android:
     name: Android ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -21,21 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: armeabi-v7a
-            target: android-arm
-
-          - name: arm64-v8a
-            target: android-arm64
-
-          - name: x86_64
-            target: android-x64
-
-          - name: universal
-            target: universal
+        name:
+          - armeabi-v7a
+          - arm64-v8a
+          - x86_64
+          - universal
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -43,9 +33,9 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Flutter
+      - name: Set up Flutter stable
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -53,82 +43,121 @@ jobs:
           cache: true
 
       - name: Generate native Flutter project
-        run: |
-          flutter create \
-            --org com.aetherwave \
-            --project-name aetherwave \
-            --platforms=android,ios \
-            .
+        run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
 
-      - name: Apply Aetherwave platform configuration
-        run: |
-          python3 tool/setup.py
+      - name: Apply platform configuration
+        run: python3 tool/setup.py
 
-      - name: Fix Android package
+      - name: Configure Android application
         shell: bash
         run: |
-          set -euo pipefail
-
-          MAIN_DIR="android/app/src/main/kotlin"
-
-          MAIN_FILE="$(find "$MAIN_DIR" -type f -name MainActivity.kt | head -n 1)"
-
-          if [ -z "$MAIN_FILE" ]; then
-            echo "ERROR: MainActivity.kt was not generated."
-            exit 1
-          fi
-
-          mkdir -p "$MAIN_DIR/com/aether/wave"
-
-          cat > "$MAIN_DIR/com/aether/wave/MainActivity.kt" <<'KOTLIN'
-package com.aether.wave
-
-import io.flutter.embedding.android.FlutterActivity
-
-class MainActivity : FlutterActivity()
-KOTLIN
-
-          rm -f "$MAIN_FILE"
-
-          echo "[OK] MainActivity package: com.aether.wave"
-
-      - name: Configure Android application ID
-        shell: bash
-        run: |
-          set -euo pipefail
+          set -e
 
           python3 - <<'PY'
-from pathlib import Path
-import re
+          from pathlib import Path
+          import re
 
-path = Path("android/app/build.gradle.kts")
-text = path.read_text()
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
 
-text = re.sub(
-    r'namespace\s*=\s*"[^"]+"',
-    'namespace = "com.aether.wave"',
-    text,
-    count=1,
-)
+          s = re.sub(
+              r'namespace\s*=\s*"[^"]+"',
+              'namespace = "com.aether.wave"',
+              s,
+              count=1
+          )
 
-text = re.sub(
-    r'applicationId\s*=\s*"[^"]+"',
-    'applicationId = "com.aether.wave"',
-    text,
-    count=1,
-)
+          s = re.sub(
+              r'applicationId\s*=\s*"[^"]+"',
+              'applicationId = "com.aether.wave"',
+              s,
+              count=1
+          )
 
-path.write_text(text)
+          loader = '''import java.io.FileInputStream
+          import java.util.Properties
 
-if 'namespace = "com.aether.wave"' not in text:
-    raise SystemExit("ERROR: namespace was not changed")
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
 
-if 'applicationId = "com.aether.wave"' not in text:
-    raise SystemExit("ERROR: applicationId was not changed")
+          require(keystorePropertiesFile.exists()) {
+              "android/key.properties is required"
+          }
 
-print("[OK] namespace = com.aether.wave")
-print("[OK] applicationId = com.aether.wave")
-PY
+          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+
+          '''
+
+          if "val keystorePropertiesFile = rootProject.file" not in s:
+              s = s.replace("android {", loader + "android {", 1)
+
+          signing = '''    signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties.getProperty("keyAlias")
+                      keyPassword = keystoreProperties.getProperty("keyPassword")
+                      storeFile = keystoreProperties.getProperty("storeFile")?.let {
+                          rootProject.file(it)
+                      }
+                      storePassword = keystoreProperties.getProperty("storePassword")
+                  }
+              }
+
+          '''
+
+          if 'create("release")' not in s:
+              s = s.replace(
+                  "    buildTypes {",
+                  signing + "    buildTypes {",
+                  1
+              )
+
+          start = s.find("    buildTypes {")
+
+          if start < 0:
+              raise SystemExit("buildTypes block not found")
+
+          depth = 0
+          end = -1
+
+          for i in range(start, len(s)):
+              if s[i] == "{":
+                  depth += 1
+              elif s[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+
+          if end < 0:
+              raise SystemExit("Could not parse buildTypes block")
+
+          build_types = '''    buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("release")
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                  }
+              }'''
+
+          s = s[:start] + build_types + s[end:]
+
+          p.write_text(s)
+
+          required = [
+              'namespace = "com.aether.wave"',
+              'applicationId = "com.aether.wave"',
+              'create("release")',
+              'signingConfigs.getByName("release")',
+              'isMinifyEnabled = false',
+              'isShrinkResources = false',
+          ]
+
+          for item in required:
+              if item not in s:
+                  raise SystemExit("Missing: " + item)
+
+          print("Android release configuration OK")
+          PY
 
       - name: Configure release signing
         shell: bash
@@ -136,17 +165,7 @@ PY
           RELEASE_BASE64: ${{ secrets.RELEASE_BASE64 }}
           LOCAL_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
         run: |
-          set -euo pipefail
-
-          if [ -z "$RELEASE_BASE64" ]; then
-            echo "ERROR: RELEASE_BASE64 secret is empty."
-            exit 1
-          fi
-
-          if [ -z "$LOCAL_PROPERTIES" ]; then
-            echo "ERROR: LOCAL_PROPERTIES secret is empty."
-            exit 1
-          fi
+          set -e
 
           printf '%s' "$LOCAL_PROPERTIES" | base64 --decode > android/key.properties
           printf '%s' "$RELEASE_BASE64" | base64 --decode > android/Aetherwave.jks
@@ -154,133 +173,12 @@ PY
           test -s android/key.properties
           test -s android/Aetherwave.jks
 
-          echo "[OK] android/key.properties created"
-          echo "[OK] android/Aetherwave.jks created"
+          echo "Signing files created successfully"
 
-      - name: Configure release build
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 - <<'PY'
-from pathlib import Path
-
-path = Path("android/app/build.gradle.kts")
-text = path.read_text()
-
-if "val keystorePropertiesFile = rootProject.file" not in text:
-    loader = '''import java.io.FileInputStream
-import java.util.Properties
-
-val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
-
-require(keystorePropertiesFile.exists()) {
-    "android/key.properties is required."
-}
-
-keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-
-'''
-
-    marker = "android {"
-
-    if marker not in text:
-        raise SystemExit("ERROR: android block not found")
-
-    text = text.replace(
-        marker,
-        loader + marker,
-        1,
-    )
-
-if 'create("release")' not in text:
-    signing = '''    signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-            storeFile = keystoreProperties.getProperty("storeFile")?.let {
-                rootProject.file(it)
-            }
-            storePassword = keystoreProperties.getProperty("storePassword")
-        }
-    }
-
-'''
-
-    marker = "    buildTypes {"
-
-    if marker not in text:
-        raise SystemExit("ERROR: buildTypes block not found")
-
-    text = text.replace(
-        marker,
-        signing + marker,
-        1,
-    )
-
-# Replace only the generated buildTypes block.
-start = text.find("    buildTypes {")
-
-if start == -1:
-    raise SystemExit("ERROR: buildTypes block missing")
-
-depth = 0
-end = None
-
-for i in range(start, len(text)):
-    if text[i] == "{":
-        depth += 1
-    elif text[i] == "}":
-        depth -= 1
-        if depth == 0:
-            end = i + 1
-            break
-
-if end is None:
-    raise SystemExit("ERROR: Could not parse buildTypes block")
-
-replacement = '''    buildTypes {
-        getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
-
-            isMinifyEnabled = false
-            isShrinkResources = false
-        }
-    }'''
-
-text = text[:start] + replacement + text[end:]
-
-path.write_text(text)
-
-required = [
-    'namespace = "com.aether.wave"',
-    'applicationId = "com.aether.wave"',
-    'create("release")',
-    'signingConfigs.getByName("release")',
-    'isMinifyEnabled = false',
-    'isShrinkResources = false',
-]
-
-for item in required:
-    if item not in text:
-        raise SystemExit(f"ERROR: Missing required configuration: {item}")
-
-print("[OK] Release signing configured")
-print("[OK] R8/minification disabled")
-print("[OK] Resource shrinking disabled")
-PY
-
-          echo
-          echo "========== ANDROID RELEASE CONFIG =========="
-          grep -nE \
-            'namespace|applicationId|create\("release"\)|signingConfig|isMinifyEnabled|isShrinkResources' \
-            android/app/build.gradle.kts
-
-      - name: Resolve Flutter dependencies
+      - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Analyze Flutter project
+      - name: Analyze
         run: flutter analyze --no-fatal-infos
 
       - name: Build Android release APK
@@ -294,9 +192,28 @@ PY
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          set -euo pipefail
+          set -e
 
-          COMMON_ARGS=(
+          case "${{ matrix.name }}" in
+            armeabi-v7a)
+              TARGET="android-arm"
+              ;;
+            arm64-v8a)
+              TARGET="android-arm64"
+              ;;
+            x86_64)
+              TARGET="android-x64"
+              ;;
+            universal)
+              TARGET=""
+              ;;
+            *)
+              echo "Unknown architecture"
+              exit 1
+              ;;
+          esac
+
+          ARGS=(
             --release
             --no-shrink
             "--dart-define=JAMENDO_CLIENT_ID=$JAMENDO_CLIENT_ID"
@@ -308,14 +225,12 @@ PY
             "--dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
           )
 
-          if [ "${{ matrix.target }}" = "universal" ]; then
-            echo "Building UNIVERSAL release APK..."
-            flutter build apk "${COMMON_ARGS[@]}"
-          else
-            echo "Building ${{ matrix.name }} release APK..."
+          if [ -n "$TARGET" ]; then
             flutter build apk \
-              "${COMMON_ARGS[@]}" \
-              --target-platform "${{ matrix.target }}"
+              "${ARGS[@]}" \
+              --target-platform "$TARGET"
+          else
+            flutter build apk "${ARGS[@]}"
           fi
 
           mkdir -p "dist/${{ matrix.name }}"
@@ -327,9 +242,8 @@ PY
           test -s \
             "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
 
-          echo
-          echo "========== APK CREATED =========="
-          ls -lh "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
+          ls -lh \
+            "dist/${{ matrix.name }}/aetherwave-${{ matrix.name }}-release.apk"
 
       - name: Upload Android release APK
         uses: actions/upload-artifact@v4
@@ -339,15 +253,13 @@ PY
           if-no-files-found: error
 
   ios:
-    name: iOS unsigned release
     runs-on: macos-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Flutter
+      - name: Set up Flutter stable
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -355,27 +267,20 @@ PY
           cache: true
 
       - name: Generate native Flutter project
-        run: |
-          flutter create \
-            --org com.aetherwave \
-            --project-name aetherwave \
-            --platforms=android,ios \
-            .
+        run: flutter create --org com.aetherwave --project-name aetherwave --platforms=android,ios .
 
-      - name: Apply Aetherwave platform configuration
+      - name: Apply platform configuration
         run: python3 tool/setup.py
 
-      - name: Resolve Flutter dependencies
+      - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Analyze Flutter project
+      - name: Analyze
         run: flutter analyze --no-fatal-infos
 
       - name: Build iOS unsigned release
         run: >-
-          flutter build ios
-          --release
-          --no-codesign
+          flutter build ios --release --no-codesign
           --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
           --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
           --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
@@ -389,4 +294,3 @@ PY
         with:
           name: aetherwave-ios-unsigned
           path: build/ios/iphoneos/Runner.app
-          if-no-files-found: error
