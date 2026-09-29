@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show User, AuthException;
 import 'api.dart';
+import 'audiomack_api.dart';
 import 'cloud.dart';
 
 class AppState extends ChangeNotifier {
@@ -33,6 +34,7 @@ class AppState extends ChangeNotifier {
   bool smartDownloads=false;
   String sortMode='recent';
   Timer? _sleep; DateTime? sleepAt;
+  String? _audiomackSession;
   Track? get current=>queue.isEmpty?null:queue[index];
   List<Track> _rl(String k)=>[for(final e in jsonDecode(p.getString(k)??'[]')) Track.fromJson(e)];
   String _js(Iterable<Track> l)=>jsonEncode([for(final t in l)t.toJson()]);
@@ -50,6 +52,24 @@ class AppState extends ChangeNotifier {
     player.playerStateStream.listen((st){if(st.processingState==ProcessingState.completed){if(repeat==2){player.seek(Duration.zero);player.play();}else{next(auto:true);}}});
   }
   void _save({bool sync=true}){p.setStringList('follows',follows.toList());p.setStringList('genres',genres.toList());p.setString('local',_js(local));p.setString('likes',_js(likes.values));p.setString('downloads',_js(downloads.values));p.setString('recent',_js(recent));p.setString('paths',jsonEncode(paths));p.setString('playlists',jsonEncode({for(final e in playlists.entries)e.key:[for(final t in e.value)t.toJson()]}));notifyListeners();if(sync)push();}
+
+  String _getAudiomackSession() {
+    final saved = p.getString('audiomackSession');
+
+    if (saved != null && saved.isNotEmpty) {
+      _audiomackSession = saved;
+      return saved;
+    }
+
+    final value =
+        'aetherwave-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 30)}';
+
+    _audiomackSession = value;
+    p.setString('audiomackSession', value);
+
+    return value;
+  }
+
   AudioSource _src(Track t){
     final tag=MediaItem(
       id:t.id,
@@ -127,7 +147,35 @@ class AppState extends ChangeNotifier {
     queue=List.of(list);
 
     final requestedIndex=i.clamp(0,queue.length-1);
-    final selected=_resolvePlayableTrack(queue,requestedIndex);
+    var selected=_resolvePlayableTrack(queue,requestedIndex);
+
+    if(selected.src=='Audiomack'&&
+        selected.url.trim().isEmpty){
+      final rawId=selected.id.startsWith('am')
+          ?selected.id.substring(2)
+          :selected.id;
+
+      final stream=await audiomackPlayUrl(
+        rawId,
+        session:_getAudiomackSession(),
+      );
+
+      if(stream==null||stream.trim().isEmpty){
+        throw StateError(
+          'Audiomack did not return a playable stream',
+        );
+      }
+
+      selected=selected.copyWith(url:stream);
+
+      final selectedIndex=queue.indexWhere(
+        (track)=>track.id==selected.id,
+      );
+
+      if(selectedIndex>=0){
+        queue[selectedIndex]=selected;
+      }
+    }
 
     final resolvedIndex=queue.indexWhere(
       (track)=>track.id==selected.id,
@@ -219,11 +267,12 @@ class AppState extends ChangeNotifier {
   void addToPlaylist(String n,Track t){final l=playlists[n]!;if(!l.any((x)=>x.id==t.id))l.add(t);_save();}
   void removeFromPlaylist(String n,Track t){playlists[n]?.removeWhere((x)=>x.id==t.id);_save();}
   void reorder(String n,int a,int b){final l=playlists[n]!;if(b>a)b--;l.insert(b,l.removeAt(a));_save();}
-  bool canDownload(Track t)=>t.dl.isNotEmpty; bool isDownloaded(Track t)=>paths[t.id]!=null&&File(paths[t.id]!).existsSync();
+  bool canDownload(Track t)=>!t.preview&&t.dl.trim().isNotEmpty; bool isDownloaded(Track t)=>paths[t.id]!=null&&File(paths[t.id]!).existsSync();
   Future<void> download(Track t)async{
     final url=t.dl.trim();
 
-    if(url.isEmpty||
+    if(t.preview||
+        url.isEmpty||
         isDownloaded(t)||
         progress.containsKey(t.id)){
       return;

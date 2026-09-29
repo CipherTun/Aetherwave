@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
+import 'audiomack_api.dart';
 
 const jamendoId = String.fromEnvironment('JAMENDO_CLIENT_ID');
 const audiusKey = String.fromEnvironment('AUDIUS_API_KEY');
@@ -36,6 +37,39 @@ class Track {
         'dl': dl, 'preview': preview, 'album': album, 'genre': genre, 'year': year, 'durationMs': durationMs,
         'license': license, 'licenseUrl': licenseUrl,
       };
+
+  Track copyWith({
+    String? id,
+    String? src,
+    String? title,
+    String? artist,
+    String? image,
+    String? url,
+    String? dl,
+    bool? preview,
+    String? album,
+    String? genre,
+    int? year,
+    int? durationMs,
+    String? license,
+    String? licenseUrl,
+  }) =>
+      Track(
+        id ?? this.id,
+        src ?? this.src,
+        title ?? this.title,
+        artist ?? this.artist,
+        image ?? this.image,
+        url ?? this.url,
+        dl ?? this.dl,
+        preview ?? this.preview,
+        album: album ?? this.album,
+        genre: genre ?? this.genre,
+        year: year ?? this.year,
+        durationMs: durationMs ?? this.durationMs,
+        license: license ?? this.license,
+        licenseUrl: licenseUrl ?? this.licenseUrl,
+      );
 }
 
 class PodcastEpisode {
@@ -86,10 +120,51 @@ Future<List<Track>> jamendo({String? q, String order = 'popularity_week'}) async
 }
 
 Track _audius(Map j) {
-  final s = 'https://api.audius.co/v1/tracks/${j['id']}/stream?app_name=$appName${audiusKey.isEmpty ? '' : '&api_key=$audiusKey'}';
-  final a = j['artwork'] ?? {};
-  return Track('au${j['id']}', 'Audius', j['title'] ?? '', j['user']?['name'] ?? '', a['1000x1000'] ?? a['480x480'] ?? a['150x150'] ?? '', s, '', false,
-      album: j['album']?['album_name'] ?? '', genre: j['genre'] ?? '', durationMs: j['duration'] == null ? null : int.tryParse('${j['duration']}')! * 1000);
+  final id = '${j['id'] ?? ''}';
+
+  final streamable =
+      j['isStreamable'] == true ||
+      j['isStreamable'] == 'true';
+
+  final downloadable =
+      j['downloadable'] == true ||
+      j['downloadable'] == 'true' ||
+      j['isDownloadable'] == true;
+
+  final s = id.isEmpty || !streamable
+      ? ''
+      : '$audiusBase/tracks/$id/stream?app_name=$appName'
+        '${audiusKey.isEmpty ? '' : '&api_key=$audiusKey'}';
+
+  final download = id.isEmpty || !downloadable
+      ? ''
+      : '$audiusBase/tracks/$id/download'
+        '${audiusKey.isEmpty ? '' : '?api_key=$audiusKey'}';
+
+  final a = j['artwork'] is Map
+      ? j['artwork'] as Map
+      : <dynamic, dynamic>{};
+
+  return Track(
+    'au$id',
+    'Audius',
+    j['title'] ?? '',
+    j['user']?['name'] ?? '',
+    a['1000x1000'] ??
+        a['_1000x1000'] ??
+        a['480x480'] ??
+        a['_480x480'] ??
+        a['150x150'] ??
+        '',
+    s,
+    download,
+    false,
+    album: j['album']?['album_name'] ?? '',
+    genre: j['genre'] ?? '',
+    durationMs: j['duration'] == null
+        ? null
+        : int.tryParse('${j['duration']}')! * 1000,
+  );
 }
 
 Future<List<Track>> audius({String? q}) async {
@@ -122,7 +197,7 @@ Track _freeToUse(Map<String, dynamic> j) {
   final files =
       Map<String, dynamic>.from((j['files'] as Map?) ?? const {});
 
-  final audioUrl = '${files['mp3'] ?? ''}';
+  final audioUrl = '${files['mp3'] ?? j['file_url'] ?? ''}';
   final releaseDate = '${j['release_date'] ?? ''}';
 
   return Track(
@@ -255,6 +330,64 @@ Future<List<Track>> archiveSearch(String q) async {
   return out;
 }
 
+
+Track _audiomack(Map<String, dynamic> j) {
+  final id = '${j['id'] ?? ''}';
+
+  final uploader =
+      j['uploader'] is Map
+          ? j['uploader'] as Map
+          : <dynamic, dynamic>{};
+
+  final artist =
+      '${j['artist'] ?? uploader['name'] ?? ''}';
+
+  final release =
+      int.tryParse('${j['released'] ?? ''}');
+
+  final year = release == null
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(
+          release * 1000,
+        ).year;
+
+  return Track(
+    'am$id',
+    'Audiomack',
+    '${j['title'] ?? ''}',
+    artist,
+    '${j['image'] ?? uploader['image'] ?? ''}',
+    '',
+    '',
+    false,
+    album: '${j['album'] ?? ''}',
+    genre: '${j['genre'] ?? ''}',
+    year: year,
+  );
+}
+
+Future<List<Track>> audiomackTracks(String q) async {
+  final results = await audiomackSearch(q);
+
+  return [
+    for (final item in results)
+      if ('${item['id'] ?? ''}'.isNotEmpty &&
+          '${item['title'] ?? ''}'.trim().isNotEmpty)
+        _audiomack(item),
+  ];
+}
+
+Future<List<Track>> audiomackTrendingTracks() async {
+  final results = await audiomackTrending();
+
+  return [
+    for (final item in results)
+      if ('${item['id'] ?? ''}'.isNotEmpty &&
+          '${item['title'] ?? ''}'.trim().isNotEmpty)
+        _audiomack(item),
+  ];
+}
+
 enum Style { hero, cards, rank }
 class Shelf {
   final String title;
@@ -271,6 +404,18 @@ class Source {
 
 final registry = <Source>[
   Source(
+    'Audiomack',
+    (q, cc) => audiomackTracks(q),
+    (cc, l) => [
+      Shelf(
+        'Audiomack trending',
+        Style.cards,
+        () => audiomackTrendingTracks(),
+      ),
+    ],
+  ),
+
+  Source(
     'ccMixter',
     (q, cc) => ccMixterSearch(q),
     (cc, l) => [
@@ -278,18 +423,6 @@ final registry = <Source>[
         'Creative Commons music',
         Style.cards,
         () => ccMixterSearch('music'),
-      ),
-    ],
-  ),
-
-  Source(
-    'FreeToUse',
-    (q, cc) => freeToUseSearch(q),
-    (cc, l) => [
-      Shelf(
-        'Free music',
-        Style.cards,
-        () => freeToUseSearch('music'),
       ),
     ],
   ),
@@ -332,7 +465,7 @@ Future<List<Track>> freeToUseSearch(String query) async {
           ? j['files'] as Map
           : <dynamic, dynamic>{};
 
-      final mp3 = '${files['mp3'] ?? ''}';
+      final mp3 = '${files['mp3'] ?? j['file_url'] ?? ''}';
 
       final thumbnails = j['thumbnails'] is Map
           ? j['thumbnails'] as Map
@@ -567,6 +700,16 @@ Future<List<Track>> ccMixterSearch(String q) async {
         break;
       }
 
+      final normalizedLicense =
+          '$license $licenseUrl'.toLowerCase();
+
+      final downloadable =
+          normalizedLicense.contains('creativecommons.org/licenses/by/') ||
+          normalizedLicense.contains('creativecommons.org/licenses/by-sa/') ||
+          normalizedLicense.contains('creativecommons.org/licenses/by-nd/') ||
+          normalizedLicense.contains('creativecommons.org/publicdomain/') ||
+          normalizedLicense.contains('public domain');
+
       result.add(
         Track(
           'ccmixter:${mediaUrl.hashCode}',
@@ -577,7 +720,7 @@ Future<List<Track>> ccMixterSearch(String q) async {
               : artist,
           '',
           link.isEmpty ? mediaUrl : link,
-          mediaUrl,
+          downloadable ? mediaUrl : '',
           false,
           license: license,
           licenseUrl: licenseUrl,
@@ -605,6 +748,7 @@ Future<List<Track>> searchAll(String q, String cc) async {
   final normalized = norm(normalizedQuery);
 
   final results = await Future.wait([
+    audiomackTracks(normalizedQuery).catchError((_) => <Track>[]),
     audiusFullSearch(normalizedQuery).catchError((_) => <Track>[]),
     freeToUseSearch(normalizedQuery).catchError((_) => <Track>[]),
     for (final source in registry)
