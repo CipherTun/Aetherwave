@@ -32,22 +32,16 @@ class _ShellState extends State<Shell> {
     final state = context.watch<AppState>();
 
     return Scaffold(
-      body: Stack(
-        children: [
-          IndexedStack(
-            index: tab,
-            children: pages,
-          ),
-          if (state.current != null)
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 82,
-              child: MiniPlayer(),
-            ),
-        ],
+      body: IndexedStack(
+        index: tab,
+        children: pages,
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (state.current != null)
+            const MiniPlayer(),
+          NavigationBar(
         selectedIndex: tab,
         onDestinationSelected: (index) {
           if (index == tab) return;
@@ -76,6 +70,7 @@ class _ShellState extends State<Shell> {
             icon: Icon(Icons.library_music_outlined),
             selectedIcon: Icon(Icons.library_music_rounded),
             label: 'Library',
+          ),
           ),
         ],
       ),
@@ -213,7 +208,7 @@ class DiscoverTab extends StatelessWidget {
           ),
         ),
         const SliverToBoxAdapter(
-          child: SizedBox(height: 150),
+          child: SizedBox(height: 96),
         ),
       ],
     );
@@ -925,99 +920,138 @@ class MiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state=context.watch<AppState>();
-    final track=state.current;
+    final state = context.watch<AppState>();
+    final track = state.current;
 
-    if(track==null){
+    if (track == null) {
       return const SizedBox.shrink();
     }
 
+    final scheme = Theme.of(context).colorScheme;
+
     return Material(
-      color:Theme.of(context)
-          .colorScheme
-          .surfaceContainerHigh,
-      elevation:4,
-      child:Column(
-        mainAxisSize:MainAxisSize.min,
-        children:[
-          StreamBuilder<Duration>(
-            stream:state.player.positionStream,
-            initialData:state.player.position,
-            builder:(context,snapshot){
-              final position=snapshot.data??Duration.zero;
-              final duration=
-                  state.player.duration??Duration.zero;
+      color: scheme.surfaceContainerHigh,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            StreamBuilder<Duration>(
+              stream: state.player.positionStream,
+              initialData: state.player.position,
+              builder: (context, snapshot) {
+                final position = snapshot.data ?? Duration.zero;
+                final duration = state.player.duration ?? Duration.zero;
+                final total = duration.inMilliseconds;
 
-              final total=duration.inMilliseconds;
-              final value=total<=0
-                  ?0.0
-                  :(position.inMilliseconds
-                          .clamp(0,total))
-                      /total;
+                final value = total <= 0
+                    ? 0.0
+                    : (position.inMilliseconds.clamp(0, total) / total);
 
-              return LinearProgressIndicator(
-                value:total<=0?null:value,
-                minHeight:2,
-              );
-            },
-          ),
+                return LinearProgressIndicator(
+                  value: total <= 0 ? null : value,
+                  minHeight: 2,
+                );
+              },
+            ),
+            GestureDetector(
+              onHorizontalDragEnd: (details) {
+                final velocity = details.primaryVelocity ?? 0;
 
-          ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(
-              horizontal:12,
-            ),
-            leading:Hero(
-              tag:'now-art',
-              child:art(track.image,48,r:8),
-            ),
-            title:Text(
-              track.title,
-              maxLines:1,
-              overflow:TextOverflow.ellipsis,
-            ),
-            subtitle:Text(
-              '${track.artist}'
-              '${track.preview?' · Preview':''}',
-              maxLines:1,
-              overflow:TextOverflow.ellipsis,
-            ),
-            onTap:()=>openPlayer(context),
-            trailing:Row(
-              mainAxisSize:MainAxisSize.min,
-              children:[
-                IconButton(
-                  tooltip:'Queue',
-                  onPressed:()=>queueSheet(context),
-                  icon:const Icon(
-                    Icons.queue_music_outlined,
-                  ),
-                ),
-                StreamBuilder<bool>(
-                  stream:state.player.playingStream,
-                  initialData:state.player.playing,
-                  builder:(context,snapshot){
-                    final playing=snapshot.data==true;
+                if (velocity < -250) {
+                  state.next();
+                } else if (velocity > 250) {
+                  state.prev();
+                }
+              },
+              onTap: () => openPlayer(context),
+              child: SizedBox(
+                height: 64,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 12),
 
-                    return IconButton.filledTonal(
-                      tooltip:playing
-                          ?'Pause'
-                          :'Play',
-                      onPressed:playing
-                          ?state.player.pause
-                          :state.player.play,
-                      icon:Icon(
-                        playing
-                            ?Icons.pause_rounded
-                            :Icons.play_arrow_rounded,
+                    Hero(
+                      tag: 'now-art',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(7),
+                        child: art(
+                          track.image,
+                          48,
+                          r: 7,
+                        ),
                       ),
-                    );
-                  },
+                    ),
+
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${track.artist}'
+                            '${track.preview ? ' · Preview' : ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    IconButton(
+                      tooltip: 'Queue',
+                      onPressed: () => queueSheet(context),
+                      icon: const Icon(
+                        Icons.queue_music_outlined,
+                      ),
+                    ),
+
+                    StreamBuilder<bool>(
+                      stream: state.player.playingStream,
+                      initialData: state.player.playing,
+                      builder: (context, snapshot) {
+                        final playing = snapshot.data == true;
+
+                        return IconButton(
+                          tooltip: playing ? 'Pause' : 'Play',
+                          onPressed: playing
+                              ? state.player.pause
+                              : state.player.play,
+                          icon: Icon(
+                            playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                          iconSize: 28,
+                        );
+                      },
+                    ),
+
+                    const SizedBox(width: 4),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
