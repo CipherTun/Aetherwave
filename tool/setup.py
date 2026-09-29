@@ -1,3 +1,4 @@
+from pathlib import Path
 """Run after `flutter create`: sets app name, permissions and background audio."""
 import glob, re
 m = 'android/app/src/main/AndroidManifest.xml'
