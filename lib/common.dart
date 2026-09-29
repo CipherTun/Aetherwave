@@ -63,26 +63,259 @@ Future<String?> askName(
 class TrackTile extends StatelessWidget {
   final List<Track> list;
   final int i;
-  const TrackTile(this.list, this.i, {super.key});
-  @override Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final track = list[i];
-    final playing = state.current?.id == track.id;
+
+  const TrackTile(
+    this.list,
+    this.i, {
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final state=context.watch<AppState>();
+    final track=list[i];
+
+    final playing=state.current?.id==track.id;
+    final downloaded=state.isDownloaded(track);
+    final downloading=state.progress.containsKey(track.id);
+    final playable=
+        track.url.trim().isNotEmpty||
+        track.dl.trim().isNotEmpty;
+
     return ListTile(
-      leading: art(track.image, 54),
-      title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: playing ? accent : null)),
-      subtitle: Text('${track.artist}${track.album.isEmpty ? '' : ' · ${track.album}'}${track.preview ? ' · Preview' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis),
-      onTap: () => state.play(list, i),
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        state.progress.containsKey(track.id)
-          ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(value: state.progress[track.id], strokeWidth: 2))
-          : IconButton(icon: Icon(state.likes.containsKey(track.id) ? Icons.favorite : Icons.favorite_border), onPressed: () => state.toggleLike(track)),
-        IconButton(icon: const Icon(Icons.more_vert), onPressed: () => trackMenu(context, track)),
-      ]),
+      leading: Stack(
+        children:[
+          art(track.image,54),
+          if(playing)
+            Positioned(
+              right:2,
+              bottom:2,
+              child:Container(
+                width:20,
+                height:20,
+                decoration:BoxDecoration(
+                  color:accent,
+                  borderRadius:BorderRadius.circular(6),
+                ),
+                child:const Icon(
+                  Icons.equalizer_rounded,
+                  size:14,
+                  color:Colors.white,
+                ),
+              ),
+            ),
+        ],
+      ),
+      title: Text(
+        track.title,
+        maxLines:1,
+        overflow:TextOverflow.ellipsis,
+        style:TextStyle(
+          fontWeight:FontWeight.w700,
+          color:playing?accent:null,
+        ),
+      ),
+      subtitle: Text(
+        '${track.artist}'
+        '${track.album.isEmpty?'':' · ${track.album}'}'
+        '${track.preview?' · Preview':''}'
+        '${downloaded?' · Downloaded':''}',
+        maxLines:1,
+        overflow:TextOverflow.ellipsis,
+      ),
+      onTap: playable
+          ? ()=>state.play(list,i)
+          : null,
+      trailing: Row(
+        mainAxisSize:MainAxisSize.min,
+        children:[
+          if(downloading)
+            SizedBox(
+              width:24,
+              height:24,
+              child:CircularProgressIndicator(
+                value:state.progress[track.id],
+                strokeWidth:2,
+              ),
+            )
+          else if(downloaded)
+            IconButton(
+              tooltip:'Downloaded',
+              icon:const Icon(
+                Icons.download_done_outlined,
+              ),
+              onPressed:()=>state.removeDownload(track),
+            )
+          else if(state.canDownload(track))
+            IconButton(
+              tooltip:'Download',
+              icon:const Icon(
+                Icons.download_outlined,
+              ),
+              onPressed:()=>state.download(track),
+            )
+          else
+            IconButton(
+              tooltip:state.likes.containsKey(track.id)
+                  ?'Remove from liked'
+                  :'Like',
+              icon:Icon(
+                state.likes.containsKey(track.id)
+                    ?Icons.favorite
+                    :Icons.favorite_border,
+              ),
+              onPressed:()=>state.toggleLike(track),
+            ),
+          IconButton(
+            tooltip:'More',
+            icon:const Icon(Icons.more_vert),
+            onPressed:()=>trackMenu(context,track),
+          ),
+        ],
+      ),
     );
   }
 }
 
 void lyricsSheet(BuildContext c,Track t){showModalBottomSheet(context:c,isScrollControlled:true,showDragHandle:true,builder:(_)=>DraggableScrollableSheet(expand:false,initialChildSize:.8,builder:(_,sc)=>FutureBuilder<String?>(future:fetchLyrics(t),builder:(c,s){if(s.connectionState!=ConnectionState.done)return const Center(child:CircularProgressIndicator());return SingleChildScrollView(controller:sc,padding:const EdgeInsets.all(24),child:Text(s.data?.isNotEmpty==true?s.data!:'No lyrics found.',style:const TextStyle(fontSize:18,height:1.6)));})));}
 void sleepSheet(BuildContext c){final s=c.read<AppState>();showModalBottomSheet(context:c,showDragHandle:true,builder:(_)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[const ListTile(title:Text('Sleep timer',style:TextStyle(fontWeight:FontWeight.bold))),for(final m in [15,30,45,60])ListTile(title:Text('$m minutes'),onTap:(){s.setSleep(m);Navigator.pop(c);}),ListTile(title:const Text('Off'),onTap:(){s.setSleep(null);Navigator.pop(c);})])));}
-void queueSheet(BuildContext c){final s=c.read<AppState>();showModalBottomSheet(context:c,isScrollControlled:true,showDragHandle:true,builder:(_)=>DraggableScrollableSheet(expand:false,initialChildSize:.75,builder:(_,sc)=>ListView.builder(controller:sc,itemCount:s.queue.length,itemBuilder:(_,i)=>ListTile(leading:art(s.queue[i].image,48),title:Text(s.queue[i].title,style:TextStyle(color:i==s.index?accent:null)),subtitle:Text(s.queue[i].artist),onTap:(){s.play(s.queue,i);Navigator.pop(c);}))));}
+void queueSheet(BuildContext c){
+  final state=c.read<AppState>();
+
+  showModalBottomSheet(
+    context:c,
+    isScrollControlled:true,
+    showDragHandle:true,
+    builder:(_)=>DraggableScrollableSheet(
+      expand:false,
+      initialChildSize:.75,
+      maxChildSize:.95,
+      builder:(_,scrollController)=>Column(
+        children:[
+          Padding(
+            padding:const EdgeInsets.fromLTRB(
+              20,
+              4,
+              12,
+              10,
+            ),
+            child:Row(
+              children:[
+                const Expanded(
+                  child:Text(
+                    'Queue',
+                    style:TextStyle(
+                      fontSize:20,
+                      fontWeight:FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${state.queue.length} tracks',
+                ),
+              ],
+            ),
+          ),
+
+          Expanded(
+            child:ListView.builder(
+              controller:scrollController,
+              itemCount:state.queue.length,
+              itemBuilder:(context,i){
+                final track=state.queue[i];
+                final active=i==state.index;
+
+                return ListTile(
+                  leading:Stack(
+                    children:[
+                      art(track.image,48,r:8),
+                      if(active)
+                        Positioned(
+                          right:0,
+                          bottom:0,
+                          child:Container(
+                            width:18,
+                            height:18,
+                            decoration:BoxDecoration(
+                              color:accent,
+                              borderRadius:
+                                  BorderRadius.circular(5),
+                            ),
+                            child:const Icon(
+                              Icons.equalizer_rounded,
+                              size:12,
+                              color:Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  title:Text(
+                    track.title,
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                    style:TextStyle(
+                      fontWeight:active
+                          ?FontWeight.w800
+                          :FontWeight.w500,
+                      color:active?accent:null,
+                    ),
+                  ),
+                  subtitle:Text(
+                    track.artist,
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                  ),
+                  onTap:(){
+                    state.play(
+                      state.queue,
+                      i,
+                    );
+                    Navigator.pop(c);
+                  },
+                  trailing:PopupMenuButton<String>(
+                    onSelected:(value){
+                      if(value=='next'){
+                        state.queue.removeAt(i);
+                        state.queue.insert(
+                          state.index+1,
+                          track,
+                        );
+                        state.notifyListeners();
+                      }
+
+                      if(value=='remove'&&
+                          state.queue.length>1){
+                        state.queue.removeAt(i);
+
+                        if(i<state.index){
+                          state.index--;
+                        }else if(
+                            state.index>=state.queue.length){
+                          state.index=
+                              state.queue.length-1;
+                        }
+
+                        state.notifyListeners();
+                      }
+                    },
+                    itemBuilder:(_)=>const[
+                      PopupMenuItem(
+                        value:'next',
+                        child:Text('Play next'),
+                      ),
+                      PopupMenuItem(
+                        value:'remove',
+                        child:Text('Remove from queue'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}

@@ -50,8 +50,106 @@ class AppState extends ChangeNotifier {
     player.playerStateStream.listen((st){if(st.processingState==ProcessingState.completed){if(repeat==2){player.seek(Duration.zero);player.play();}else{next(auto:true);}}});
   }
   void _save({bool sync=true}){p.setStringList('follows',follows.toList());p.setStringList('genres',genres.toList());p.setString('local',_js(local));p.setString('likes',_js(likes.values));p.setString('downloads',_js(downloads.values));p.setString('recent',_js(recent));p.setString('paths',jsonEncode(paths));p.setString('playlists',jsonEncode({for(final e in playlists.entries)e.key:[for(final t in e.value)t.toJson()]}));notifyListeners();if(sync)push();}
-  AudioSource _src(Track t){final tag=MediaItem(id:t.id,title:t.title,artist:t.artist,album:t.album.isEmpty?'Aetherwave':t.album,artUri:Uri.tryParse(t.image));if(t.src=='Device')return AudioSource.file(t.url,tag:tag);final f=paths[t.id];if(f!=null&&File(f).existsSync())return AudioSource.file(f,tag:tag);return AudioSource.uri(Uri.parse(t.url),tag:tag);}
-  Future<void> play(List<Track> list,int i)async{if(list.isEmpty)return;queue=List.of(list);index=i.clamp(0,queue.length-1);recent=[queue[index],...recent.where((t)=>t.id!=queue[index].id)].take(50).toList();_save();try{await player.setAudioSource(_src(queue[index]));await player.setSpeed(speed);await player.play();}catch(_){} }
+  AudioSource _src(Track t){
+    final tag=MediaItem(
+      id:t.id,
+      title:t.title,
+      artist:t.artist,
+      album:t.album.isEmpty?'Aetherwave':t.album,
+      artUri:Uri.tryParse(t.image),
+    );
+
+    if(t.src=='Device'){
+      return AudioSource.file(t.url,tag:tag);
+    }
+
+    final localPath=paths[t.id];
+
+    if(localPath!=null&&File(localPath).existsSync()){
+      return AudioSource.file(localPath,tag:tag);
+    }
+
+    final playbackUrl=t.url.trim().isNotEmpty
+        ? t.url.trim()
+        : t.dl.trim();
+
+    if(playbackUrl.isEmpty){
+      throw StateError('No playable audio URL');
+    }
+
+    return AudioSource.uri(
+      Uri.parse(playbackUrl),
+      tag:tag,
+    );
+  }
+  Track _resolvePlayableTrack(List<Track> list,int requestedIndex){
+    if(list.isEmpty){
+      throw StateError('Cannot resolve an empty track list');
+    }
+
+    final safeIndex=requestedIndex.clamp(0,list.length-1);
+    final requested=list[safeIndex];
+
+    if(!requested.preview&&requested.url.trim().isNotEmpty){
+      return requested;
+    }
+
+    final title=requested.title.trim().toLowerCase();
+    final artist=requested.artist.trim().toLowerCase();
+
+    for(final candidate in list){
+      if(candidate.id==requested.id)continue;
+      if(candidate.preview)continue;
+
+      final playable=candidate.url.trim().isNotEmpty ||
+          candidate.dl.trim().isNotEmpty;
+
+      if(!playable)continue;
+
+      final sameTitle=
+          candidate.title.trim().toLowerCase()==title;
+
+      final sameArtist=
+          artist.isEmpty ||
+          candidate.artist.trim().toLowerCase()==artist;
+
+      if(sameTitle&&sameArtist){
+        return candidate;
+      }
+    }
+
+    return requested;
+  }
+
+  Future<void> play(List<Track> list,int i)async{
+    if(list.isEmpty)return;
+
+    queue=List.of(list);
+
+    final requestedIndex=i.clamp(0,queue.length-1);
+    final selected=_resolvePlayableTrack(queue,requestedIndex);
+
+    final resolvedIndex=queue.indexWhere(
+      (track)=>track.id==selected.id,
+    );
+
+    index=resolvedIndex<0?requestedIndex:resolvedIndex;
+
+    recent=[
+      queue[index],
+      ...recent.where((track)=>track.id!=queue[index].id),
+    ].take(50).toList();
+
+    _save();
+
+    try{
+      await player.setAudioSource(_src(queue[index]));
+      await player.setSpeed(speed);
+      await player.play();
+    }catch(_){
+      notifyListeners();
+    }
+  }
   Future<void> next({bool auto=false})async{if(queue.isEmpty)return;var n=shuffle?Random().nextInt(queue.length):index+1;if(n>=queue.length){if(repeat==1||!auto)n=0;else return;}await play(queue,n);}
   Future<void> prev()async{if(player.position.inSeconds>3||index==0)return player.seek(Duration.zero);await play(queue,index-1);}
   void playNext(Track t){queue.insert(queue.isEmpty?0:index+1,t);notifyListeners();}
@@ -71,7 +169,92 @@ class AppState extends ChangeNotifier {
   void removeFromPlaylist(String n,Track t){playlists[n]?.removeWhere((x)=>x.id==t.id);_save();}
   void reorder(String n,int a,int b){final l=playlists[n]!;if(b>a)b--;l.insert(b,l.removeAt(a));_save();}
   bool canDownload(Track t)=>t.dl.isNotEmpty; bool isDownloaded(Track t)=>paths[t.id]!=null&&File(paths[t.id]!).existsSync();
-  Future<void> download(Track t)async{if(!canDownload(t)||isDownloaded(t)||progress.containsKey(t.id))return;progress[t.id]=0;notifyListeners();final c=http.Client();try{final dir=await getApplicationDocumentsDirectory();final ext=t.dl.toLowerCase().contains('.wav')?'.wav':'.mp3';final f=File('${dir.path}/${t.id}$ext');final res=await c.send(http.Request('GET',Uri.parse(t.dl)));if(res.statusCode<200||res.statusCode>=300)throw Exception('download ${res.statusCode}');final sink=f.openWrite();var got=0;await for(final b in res.stream){sink.add(b);got+=b.length;if((res.contentLength??0)>0){progress[t.id]=got/res.contentLength!;notifyListeners();}}await sink.close();paths[t.id]=f.path;downloads[t.id]=t;}catch(_){}c.close();progress.remove(t.id);_save();}
+  Future<void> download(Track t)async{
+    final url=t.dl.trim();
+
+    if(url.isEmpty||
+        isDownloaded(t)||
+        progress.containsKey(t.id)){
+      return;
+    }
+
+    progress[t.id]=0;
+    notifyListeners();
+
+    final client=http.Client();
+    File? target;
+
+    try{
+      final dir=await getApplicationDocumentsDirectory();
+
+      final lower=url.toLowerCase();
+
+      final extension=lower.contains('.flac')
+          ?'.flac'
+          :lower.contains('.wav')
+              ?'.wav'
+              :lower.contains('.ogg')
+                  ?'.ogg'
+                  :'.mp3';
+
+      target=File(
+        '${dir.path}/${t.id}$extension',
+      );
+
+      final request=http.Request(
+        'GET',
+        Uri.parse(url),
+      );
+
+      request.headers['Accept']='audio/*';
+
+      final response=await client.send(request);
+
+      if(response.statusCode<200||
+          response.statusCode>=300){
+        throw HttpException(
+          'Download failed: HTTP ${response.statusCode}',
+          uri:Uri.parse(url),
+        );
+      }
+
+      final sink=target.openWrite();
+
+      var received=0;
+      final total=response.contentLength??0;
+
+      await for(final chunk in response.stream){
+        sink.add(chunk);
+        received+=chunk.length;
+
+        if(total>0){
+          progress[t.id]=received/total;
+          notifyListeners();
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+
+      if(!await target.exists()||
+          await target.length()==0){
+        throw StateError('Downloaded file is empty');
+      }
+
+      paths[t.id]=target.path;
+      downloads[t.id]=t;
+    }catch(_){
+      if(target!=null&&await target.exists()){
+        try{
+          await target.delete();
+        }catch(_){}
+      }
+    }finally{
+      client.close();
+      progress.remove(t.id);
+      _save();
+    }
+  }
   Future<void> removeDownload(Track t)async{final f=paths.remove(t.id);downloads.remove(t.id);if(f!=null&&File(f).existsSync())await File(f).delete();_save();}
   Future<void> smartDownload()async{if(!smartDownloads)return;final candidates=[...likes.values,...recent];final seen=<String>{};for(final t in candidates){if(seen.add(t.id)&&canDownload(t)&&!isDownloaded(t))await download(t);}}
   void setSmartDownloads(bool v){smartDownloads=v;p.setBool('smartDownloads',v);notifyListeners();if(v)smartDownload();}

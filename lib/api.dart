@@ -11,6 +11,7 @@ const appName = 'Aetherwave';
 
 const freeToUseBase = 'https://api.freetouse.com/v3';
 const audiusBase = 'https://api.audius.co/v1';
+const ccMixterBase = 'https://ccmixter.org/api/query';
 
 
 class Track {
@@ -361,7 +362,7 @@ Future<List<Track>> freeToUseSearch(String query) async {
         '${j['title'] ?? ''}',
         artist,
         artwork,
-        '${j['url'] ?? ''}',
+        mp3.isNotEmpty ? mp3 : '${j['url'] ?? ''}',
         mp3,
         false,
         album: '',
@@ -436,13 +437,17 @@ Future<List<Track>> audiusFullSearch(String query) async {
           j['downloadable'] == 'true' ||
           j['isDownloadable'] == true;
 
+      final streamUrl = id.isEmpty
+          ? ''
+          : '$audiusBase/tracks/$id/stream?app_name=$appName${audiusKey.isEmpty ? '' : '&api_key=$audiusKey'}';
+
       return Track(
         'audius:$id',
         'audius',
         title,
         artist,
         artwork,
-        id.isEmpty ? '' : 'https://audius.co/$id',
+        streamable ? streamUrl : '',
         downloadable && id.isNotEmpty
             ? '$audiusBase/tracks/$id/download'
             : '',
@@ -589,41 +594,87 @@ Future<List<Track>> ccMixterSearch(String q) async {
 Future<List<Track>> searchAll(String q, String cc) async {
   final normalizedQuery = q.trim();
   if (normalizedQuery.isEmpty) return [];
-  final results = await Future.wait([
-      audiusFullSearch(query),
-      freeToUseSearch(query),
-    for (final s in registry) s.search(normalizedQuery, cc).catchError((_) => <Track>[]),
-  ]);
-  final all = <Track>[];
-  for (final list in results) all.addAll(list);
 
-  String norm(String v) => v.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
-  final query = norm(normalizedQuery);
-  int score(Track t) {
-    final title = norm(t.title);
-    final artist = norm(t.artist);
-    var n = 0;
-    if (title == query) n += 100;
-    if (title.contains(query)) n += 45;
-    if (artist.contains(query)) n += 30;
-    if (t.url.isNotEmpty) n += 20;
-    if (!t.preview) n += 15;
-    if (t.dl.isNotEmpty) n += 25;
-    if (!t.preview) n += 10;
-    if (t.album.trim().isNotEmpty) n += 4;
-    if (t.image.isNotEmpty) n += 3;
-    return n;
+  String norm(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
   }
+
+  final normalized = norm(normalizedQuery);
+
+  final results = await Future.wait([
+    audiusFullSearch(normalizedQuery).catchError((_) => <Track>[]),
+    freeToUseSearch(normalizedQuery).catchError((_) => <Track>[]),
+    for (final source in registry)
+      source.search(normalizedQuery, cc).catchError((_) => <Track>[]),
+  ]);
+
+  final all = <Track>[];
+
+  for (final list in results) {
+    all.addAll(list);
+  }
+
+  int score(Track track) {
+    final title = norm(track.title);
+    final artist = norm(track.artist);
+    final album = norm(track.album);
+
+    var score = 0;
+
+    // Exact identity matches.
+    if (title == normalized) score += 140;
+    if (artist == normalized) score += 70;
+    if (album == normalized) score += 35;
+
+    // Partial identity matches.
+    if (title.contains(normalized)) score += 50;
+    if (artist.contains(normalized)) score += 35;
+    if (album.contains(normalized)) score += 15;
+
+    // Real playback is preferred.
+    if (track.url.trim().isNotEmpty) score += 30;
+
+    // Full tracks are preferred over previews.
+    if (!track.preview) score += 35;
+
+    // Explicit provider-authorized download.
+    if (track.dl.trim().isNotEmpty) score += 25;
+
+    // Complete metadata.
+    if (track.album.trim().isNotEmpty) score += 5;
+    if (track.image.trim().isNotEmpty) score += 4;
+    if ((track.durationMs ?? 0) > 0) score += 3;
+
+    return score;
+  }
+
   all.sort((a, b) => score(b).compareTo(score(a)));
 
-  final seen = <String, Track>{};
-  for (final t in all) {
-    final key = '${norm(t.title)}|${norm(t.artist)}';
-    if (key.isEmpty || key == '|') continue;
-    final existing = seen[key];
-    if (existing == null || score(t) > score(existing)) seen[key] = t;
+  // Collapse identical title/artist results while retaining
+  // the highest-ranked provider result.
+  final selected = <String, Track>{};
+
+  for (final track in all) {
+    final title = norm(track.title);
+    final artist = norm(track.artist);
+
+    if (title.isEmpty) continue;
+
+    final key = '$title|$artist';
+    final previous = selected[key];
+
+    if (previous == null || score(track) > score(previous)) {
+      selected[key] = track;
+    }
   }
-  return seen.values.toList();
+
+  final output = selected.values.toList();
+  output.sort((a, b) => score(b).compareTo(score(a)));
+
+  return output;
 }
 
 Future<List<Country>> fetchCountries() async {

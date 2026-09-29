@@ -580,26 +580,448 @@ class _CountryPageState extends State<CountryPage> {
 
 class PlayerPage extends StatelessWidget {
   const PlayerPage({super.key});
-  @override Widget build(BuildContext context) {
-    final state = context.watch<AppState>(); final track = state.current;
-    if (track == null) return const Scaffold(body: Center(child: Text('Nothing playing')));
-    return Scaffold(appBar: AppBar(actions: [IconButton(onPressed: () => queueSheet(context), icon: const Icon(Icons.queue_music))]), body: Padding(padding: const EdgeInsets.all(22), child: Column(children: [
-      const Spacer(),
-      Hero(tag: 'now-art', child: art(track.image, 330, r: 24)),
-      const SizedBox(height: 25), Text(track.title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800)), Text(track.artist, style: const TextStyle(color: Colors.white60)),
-      const SizedBox(height: 20),
-      StreamBuilder<Duration>(stream: state.player.positionStream, initialData: state.player.position, builder: (context, snap) {
-        final duration = state.player.duration ?? Duration.zero; final position = snap.data ?? Duration.zero; final max = duration.inMilliseconds <= 0 ? 1.0 : duration.inMilliseconds.toDouble(); final value = position.inMilliseconds.clamp(0, duration.inMilliseconds).toDouble();
-        return Column(children: [Slider(value: duration.inMilliseconds <= 0 ? 0 : value, max: max, onChanged: (v) => state.player.seek(Duration(milliseconds: v.toInt()))), Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_fmt(position)), Text(_fmt(duration))])]);
-      }),
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [IconButton(onPressed: state.prev, icon: const Icon(Icons.skip_previous_rounded), iconSize: 38), StreamBuilder<bool>(stream: state.player.playingStream, initialData: state.player.playing, builder: (context, snap) => IconButton.filled(onPressed: () => snap.data == true ? state.player.pause() : state.player.play(), icon: Icon(snap.data == true ? Icons.pause : Icons.play_arrow), iconSize: 40)), IconButton(onPressed: state.next, icon: const Icon(Icons.skip_next_rounded), iconSize: 38)]),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [IconButton(onPressed: state.toggleShuffle, icon: Icon(Icons.shuffle, color: state.shuffle ? accent : null)), IconButton(onPressed: () => lyricsSheet(context, track), icon: const Icon(Icons.lyrics_outlined)), IconButton(onPressed: () => sleepSheet(context), icon: const Icon(Icons.bedtime_outlined)), PopupMenuButton<double>(initialValue: state.speed, onSelected: state.setSpeed, itemBuilder: (_) => <double>[0.75, 1.0, 1.25, 1.5, 2.0].map((v) => PopupMenuItem<double>(value: v, child: Text('${v}x'))).toList(), child: const Icon(Icons.speed)), IconButton(onPressed: state.cycleRepeat, icon: Icon(state.repeat == 2 ? Icons.repeat_one : Icons.repeat, color: state.repeat > 0 ? accent : null))]),
-      const Spacer(),
-    ])));
+
+  @override
+  Widget build(BuildContext context) {
+    final state=context.watch<AppState>();
+    final track=state.current;
+
+    if(track==null){
+      return const Scaffold(
+        body:Center(
+          child:Text('Nothing playing'),
+        ),
+      );
+    }
+
+    final liked=state.likes.containsKey(track.id);
+    final downloaded=state.isDownloaded(track);
+    final downloading=state.progress.containsKey(track.id);
+
+    return Scaffold(
+      appBar:AppBar(
+        title:const Text('Now Playing'),
+        centerTitle:true,
+        actions:[
+          IconButton(
+            tooltip:'Queue',
+            onPressed:()=>queueSheet(context),
+            icon:const Icon(
+              Icons.queue_music_outlined,
+            ),
+          ),
+        ],
+      ),
+      body:SafeArea(
+        child:LayoutBuilder(
+          builder:(context,constraints){
+            final imageSize=
+                constraints.maxWidth.clamp(220.0,380.0);
+
+            return SingleChildScrollView(
+              padding:const EdgeInsets.fromLTRB(
+                22,
+                10,
+                22,
+                28,
+              ),
+              child:Column(
+                children:[
+                  Hero(
+                    tag:'now-art',
+                    child:art(
+                      track.image,
+                      imageSize,
+                      r:24,
+                    ),
+                  ),
+
+                  const SizedBox(height:24),
+
+                  Text(
+                    track.title,
+                    textAlign:TextAlign.center,
+                    maxLines:2,
+                    overflow:TextOverflow.ellipsis,
+                    style:const TextStyle(
+                      fontSize:25,
+                      fontWeight:FontWeight.w800,
+                    ),
+                  ),
+
+                  const SizedBox(height:6),
+
+                  Text(
+                    track.artist,
+                    textAlign:TextAlign.center,
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                    style:const TextStyle(
+                      color:Colors.white60,
+                      fontSize:16,
+                    ),
+                  ),
+
+                  if(track.preview)
+                    Padding(
+                      padding:const EdgeInsets.only(top:10),
+                      child:Chip(
+                        avatar:const Icon(
+                          Icons.timer_outlined,
+                          size:16,
+                        ),
+                        label:const Text(
+                          'Preview',
+                        ),
+                      ),
+                    ),
+
+                  if(downloaded)
+                    const Padding(
+                      padding:EdgeInsets.only(top:8),
+                      child:Chip(
+                        avatar:Icon(
+                          Icons.download_done_outlined,
+                          size:16,
+                        ),
+                        label:Text(
+                          'Downloaded',
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height:18),
+
+                  StreamBuilder<Duration>(
+                    stream:state.player.positionStream,
+                    initialData:state.player.position,
+                    builder:(context,snapshot){
+                      final position=snapshot.data??Duration.zero;
+                      final duration=
+                          state.player.duration??Duration.zero;
+
+                      final durationMs=
+                          duration.inMilliseconds;
+
+                      final positionMs=
+                          position.inMilliseconds
+                              .clamp(
+                                0,
+                                durationMs>0
+                                    ?durationMs
+                                    :1,
+                              );
+
+                      return Column(
+                        children:[
+                          Slider(
+                            value:durationMs<=0
+                                ?0
+                                :positionMs.toDouble(),
+                            max:durationMs<=0
+                                ?1
+                                :durationMs.toDouble(),
+                            onChanged:durationMs<=0
+                                ?null
+                                :(value){
+                                    state.player.seek(
+                                      Duration(
+                                        milliseconds:
+                                            value.round(),
+                                      ),
+                                    );
+                                  },
+                          ),
+                          Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children:[
+                              Text(_fmt(position)),
+                              Text(_fmt(duration)),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height:8),
+
+                  StreamBuilder<bool>(
+                    stream:state.player.playingStream,
+                    initialData:state.player.playing,
+                    builder:(context,snapshot){
+                      final playing=snapshot.data==true;
+
+                      return Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.center,
+                        children:[
+                          IconButton(
+                            tooltip:'Previous',
+                            onPressed:state.prev,
+                            icon:const Icon(
+                              Icons.skip_previous_rounded,
+                            ),
+                            iconSize:40,
+                          ),
+                          const SizedBox(width:10),
+                          IconButton.filled(
+                            tooltip:playing
+                                ?'Pause'
+                                :'Play',
+                            onPressed:playing
+                                ?state.player.pause
+                                :state.player.play,
+                            icon:Icon(
+                              playing
+                                  ?Icons.pause_rounded
+                                  :Icons.play_arrow_rounded,
+                            ),
+                            iconSize:42,
+                          ),
+                          const SizedBox(width:10),
+                          IconButton(
+                            tooltip:'Next',
+                            onPressed:state.next,
+                            icon:const Icon(
+                              Icons.skip_next_rounded,
+                            ),
+                            iconSize:40,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height:14),
+
+                  Row(
+                    mainAxisAlignment:
+                        MainAxisAlignment.spaceEvenly,
+                    children:[
+                      IconButton(
+                        tooltip:'Shuffle',
+                        onPressed:state.toggleShuffle,
+                        icon:Icon(
+                          Icons.shuffle_rounded,
+                          color:state.shuffle
+                              ?accent
+                              :null,
+                        ),
+                      ),
+
+                      IconButton(
+                        tooltip:liked
+                            ?'Remove from liked'
+                            :'Like',
+                        onPressed:()=>state.toggleLike(track),
+                        icon:Icon(
+                          liked
+                              ?Icons.favorite
+                              :Icons.favorite_border,
+                          color:liked
+                              ?accent
+                              :null,
+                        ),
+                      ),
+
+                      if(state.canDownload(track))
+                        IconButton(
+                          tooltip:downloaded
+                              ?'Remove download'
+                              :'Download',
+                          onPressed:downloading
+                              ?null
+                              :downloaded
+                                  ?()=>state.removeDownload(track)
+                                  :()=>state.download(track),
+                          icon:Icon(
+                            downloaded
+                                ?Icons.download_done_outlined
+                                :Icons.download_outlined,
+                          ),
+                        ),
+
+                      IconButton(
+                        tooltip:'Lyrics',
+                        onPressed:()=>lyricsSheet(
+                          context,
+                          track,
+                        ),
+                        icon:const Icon(
+                          Icons.lyrics_outlined,
+                        ),
+                      ),
+
+                      IconButton(
+                        tooltip:'Sleep timer',
+                        onPressed:()=>sleepSheet(context),
+                        icon:const Icon(
+                          Icons.bedtime_outlined,
+                        ),
+                      ),
+
+                      PopupMenuButton<double>(
+                        tooltip:'Playback speed',
+                        initialValue:state.speed,
+                        onSelected:state.setSpeed,
+                        itemBuilder:(_)=><double>[
+                          0.75,
+                          1.0,
+                          1.25,
+                          1.5,
+                          2.0,
+                        ].map(
+                          (value)=>PopupMenuItem<double>(
+                            value:value,
+                            child:Text('${value}x'),
+                          ),
+                        ).toList(),
+                        child:const Icon(
+                          Icons.speed_outlined,
+                        ),
+                      ),
+
+                      IconButton(
+                        tooltip:'Repeat',
+                        onPressed:state.cycleRepeat,
+                        icon:Icon(
+                          state.repeat==2
+                              ?Icons.repeat_one_rounded
+                              :Icons.repeat_rounded,
+                          color:state.repeat>0
+                              ?accent
+                              :null,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height:10),
+
+                  OutlinedButton.icon(
+                    onPressed:()=>queueSheet(context),
+                    icon:const Icon(
+                      Icons.queue_music_outlined,
+                    ),
+                    label:Text(
+                      'Queue · ${state.queue.length}',
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 }
+
 String _fmt(Duration d) => '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
-class MiniPlayer extends StatelessWidget { const MiniPlayer({super.key}); @override Widget build(BuildContext context) { final state = context.watch<AppState>(); final track = state.current!; return Material(color: Theme.of(context).colorScheme.surfaceContainerHigh, child: ListTile(leading: art(track.image, 48), title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(track.artist, maxLines: 1), onTap: () => openPlayer(context), trailing: StreamBuilder<bool>(stream: state.player.playingStream, initialData: state.player.playing, builder: (context, snap) => IconButton(onPressed: () => snap.data == true ? state.player.pause() : state.player.play(), icon: Icon(snap.data == true ? Icons.pause : Icons.play_arrow))))); } }
+class MiniPlayer extends StatelessWidget {
+  const MiniPlayer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state=context.watch<AppState>();
+    final track=state.current;
+
+    if(track==null){
+      return const SizedBox.shrink();
+    }
+
+    return Material(
+      color:Theme.of(context)
+          .colorScheme
+          .surfaceContainerHigh,
+      elevation:4,
+      child:Column(
+        mainAxisSize:MainAxisSize.min,
+        children:[
+          StreamBuilder<Duration>(
+            stream:state.player.positionStream,
+            initialData:state.player.position,
+            builder:(context,snapshot){
+              final position=snapshot.data??Duration.zero;
+              final duration=
+                  state.player.duration??Duration.zero;
+
+              final total=duration.inMilliseconds;
+              final value=total<=0
+                  ?0.0
+                  :(position.inMilliseconds
+                          .clamp(0,total))
+                      /total;
+
+              return LinearProgressIndicator(
+                value:total<=0?null:value,
+                minHeight:2,
+              );
+            },
+          ),
+
+          ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(
+              horizontal:12,
+            ),
+            leading:Hero(
+              tag:'now-art',
+              child:art(track.image,48,r:8),
+            ),
+            title:Text(
+              track.title,
+              maxLines:1,
+              overflow:TextOverflow.ellipsis,
+            ),
+            subtitle:Text(
+              '${track.artist}'
+              '${track.preview?' · Preview':''}',
+              maxLines:1,
+              overflow:TextOverflow.ellipsis,
+            ),
+            onTap:()=>openPlayer(context),
+            trailing:Row(
+              mainAxisSize:MainAxisSize.min,
+              children:[
+                IconButton(
+                  tooltip:'Queue',
+                  onPressed:()=>queueSheet(context),
+                  icon:const Icon(
+                    Icons.queue_music_outlined,
+                  ),
+                ),
+                StreamBuilder<bool>(
+                  stream:state.player.playingStream,
+                  initialData:state.player.playing,
+                  builder:(context,snapshot){
+                    final playing=snapshot.data==true;
+
+                    return IconButton.filledTonal(
+                      tooltip:playing
+                          ?'Pause'
+                          :'Play',
+                      onPressed:playing
+                          ?state.player.pause
+                          :state.player.play,
+                      icon:Icon(
+                        playing
+                            ?Icons.pause_rounded
+                            :Icons.play_arrow_rounded,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
