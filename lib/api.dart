@@ -367,24 +367,38 @@ Track _audiomack(Map<String, dynamic> j) {
 }
 
 Future<List<Track>> audiomackTracks(String q) async {
-  final results = await audiomackSearch(q);
+  final response = await AudiomackApi.search(
+    q,
+    sortBy: 'relevant',
+    page: 1,
+  );
+
+  final results = response?.results ?? const [];
 
   return [
     for (final item in results)
-      if ('${item['id'] ?? ''}'.isNotEmpty &&
+      if (item is Map &&
+          '${item['id'] ?? ''}'.isNotEmpty &&
           '${item['title'] ?? ''}'.trim().isNotEmpty)
-        _audiomack(item),
+        _audiomack(Map<String, dynamic>.from(item)),
   ];
 }
 
 Future<List<Track>> audiomackTrendingTracks() async {
-  final results = await audiomackTrending();
+  final response = await AudiomackApi.search(
+    'music',
+    sortBy: 'popular',
+    page: 1,
+  );
+
+  final results = response?.results ?? const [];
 
   return [
     for (final item in results)
-      if ('${item['id'] ?? ''}'.isNotEmpty &&
+      if (item is Map &&
+          '${item['id'] ?? ''}'.isNotEmpty &&
           '${item['title'] ?? ''}'.trim().isNotEmpty)
-        _audiomack(item),
+        _audiomack(Map<String, dynamic>.from(item)),
   ];
 }
 

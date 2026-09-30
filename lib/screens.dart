@@ -71,7 +71,6 @@ class _ShellState extends State<Shell> {
             selectedIcon: Icon(Icons.library_music_rounded),
             label: 'Library',
           ),
-          ),
         ],
       ),
     );
