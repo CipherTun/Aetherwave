@@ -73,9 +73,7 @@ class _ShellState extends State<Shell> {
           ),
         ],
       ),
-    ],
-  ),
-);
+    );
   }
 }
 

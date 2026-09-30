@@ -418,18 +418,6 @@ class Source {
 
 final registry = <Source>[
   Source(
-    'FreeToUse',
-    (q, cc) => freeToUseSearch(q),
-    (cc, l) => [
-      Shelf(
-        'Free music',
-        Style.cards,
-        () => freeToUseSearch('music'),
-      ),
-    ],
-  ),
-
-  Source(
     'Audiomack',
     (q, cc) => audiomackTracks(q),
     (cc, l) => [
