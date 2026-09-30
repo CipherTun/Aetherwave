@@ -186,10 +186,7 @@ jobs:
         env:
           JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           AUDIUS_API_KEY: ${{ secrets.AUDIUS_API_KEY }}
-          AUDIOMACK_CONSUMER_KEY: ${{ secrets.AUDIOMACK_CONSUMER_KEY }}
-          AUDIOMACK_CONSUMER_SECRET: ${{ secrets.AUDIOMACK_CONSUMER_SECRET }}
-          AUDIOMACK_CONSUMER_KEY: ${{ secrets.AUDIOMACK_CONSUMER_KEY }}
-          AUDIOMACK_CONSUMER_SECRET: ${{ secrets.AUDIOMACK_CONSUMER_SECRET }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           OPENVERSE_API_TOKEN: ${{ secrets.OPENVERSE_API_TOKEN }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
@@ -222,8 +219,7 @@ jobs:
             --no-shrink
             "--dart-define=JAMENDO_CLIENT_ID=$JAMENDO_CLIENT_ID"
             "--dart-define=AUDIUS_API_KEY=$AUDIUS_API_KEY"
-            "--dart-define=AUDIOMACK_CONSUMER_KEY=$AUDIOMACK_CONSUMER_KEY"
-            "--dart-define=AUDIOMACK_CONSUMER_SECRET=$AUDIOMACK_CONSUMER_SECRET"
+            "--dart-define=RAPIDAPI_KEY=$RAPIDAPI_KEY"
             "--dart-define=OPENVERSE_API_TOKEN=$OPENVERSE_API_TOKEN"
             "--dart-define=PODCASTINDEX_API_KEY=$PODCASTINDEX_API_KEY"
             "--dart-define=PODCASTINDEX_API_SECRET=$PODCASTINDEX_API_SECRET"
@@ -289,8 +285,7 @@ jobs:
           flutter build ios --release --no-codesign
           --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
           --dart-define=AUDIUS_API_KEY=${{ secrets.AUDIUS_API_KEY }}
-          --dart-define=AUDIOMACK_CONSUMER_KEY=${{ secrets.AUDIOMACK_CONSUMER_KEY }}
-          --dart-define=AUDIOMACK_CONSUMER_SECRET=${{ secrets.AUDIOMACK_CONSUMER_SECRET }}
+          --dart-define=RAPIDAPI_KEY=${{ secrets.RAPIDAPI_KEY }}
           --dart-define=OPENVERSE_API_TOKEN=${{ secrets.OPENVERSE_API_TOKEN }}
           --dart-define=PODCASTINDEX_API_KEY=${{ secrets.PODCASTINDEX_API_KEY }}
           --dart-define=PODCASTINDEX_API_SECRET=${{ secrets.PODCASTINDEX_API_SECRET }}

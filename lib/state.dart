@@ -34,7 +34,6 @@ class AppState extends ChangeNotifier {
   bool smartDownloads=false;
   String sortMode='recent';
   Timer? _sleep; DateTime? sleepAt;
-  String? _audiomackSession;
   Track? get current=>queue.isEmpty?null:queue[index];
   List<Track> _rl(String k)=>[for(final e in jsonDecode(p.getString(k)??'[]')) Track.fromJson(e)];
   String _js(Iterable<Track> l)=>jsonEncode([for(final t in l)t.toJson()]);
@@ -52,23 +51,6 @@ class AppState extends ChangeNotifier {
     player.playerStateStream.listen((st){if(st.processingState==ProcessingState.completed){if(repeat==2){player.seek(Duration.zero);player.play();}else{next(auto:true);}}});
   }
   void _save({bool sync=true}){p.setStringList('follows',follows.toList());p.setStringList('genres',genres.toList());p.setString('local',_js(local));p.setString('likes',_js(likes.values));p.setString('downloads',_js(downloads.values));p.setString('recent',_js(recent));p.setString('paths',jsonEncode(paths));p.setString('playlists',jsonEncode({for(final e in playlists.entries)e.key:[for(final t in e.value)t.toJson()]}));notifyListeners();if(sync)push();}
-
-  String _getAudiomackSession() {
-    final saved = p.getString('audiomackSession');
-
-    if (saved != null && saved.isNotEmpty) {
-      _audiomackSession = saved;
-      return saved;
-    }
-
-    final value =
-        'aetherwave-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 30)}';
-
-    _audiomackSession = value;
-    p.setString('audiomackSession', value);
-
-    return value;
-  }
 
   AudioSource _src(Track t){
     final tag=MediaItem(
@@ -155,10 +137,8 @@ class AppState extends ChangeNotifier {
           ?selected.id.substring(2)
           :selected.id;
 
-      final stream=await audiomackPlayUrl(
-        rawId,
-        session:_getAudiomackSession(),
-      );
+      final response = await AudiomackApi.play(rawId);
+      final stream = AudiomackApi.extractUrl(response);
 
       if(stream==null||stream.trim().isEmpty){
         throw StateError(
